@@ -2,6 +2,7 @@ import base64
 import logging
 import os
 import posixpath
+import secrets
 import subprocess
 import sys
 from urllib.parse import urlparse
@@ -85,6 +86,12 @@ def create_app() -> Flask:
     relay_base_url_env = (os.environ.get("RELAY_BASE_URL") or "").rstrip("/")
     web_lan_url = f"http://{host_ip}:{web_port}"
     web_public_url = (os.environ.get("WEB_BASE_URL") or "").rstrip("/")
+
+    auth_user = os.environ.get("AUTH_USER", "")
+    auth_pass = os.environ.get("AUTH_PASS", "")
+    auth_enabled = bool(auth_user and auth_pass)
+    if auth_enabled:
+        log.info("basic auth   = enabled (proxied requests only)")
     log.info("host_ip       = %s", host_ip)
     log.info("tv_ip         = %s  (cast %s)",
              tv_ip or "-", "enabled" if tv_ip else "disabled")
@@ -100,7 +107,8 @@ def create_app() -> Flask:
         log.error("M3U_URL did not yield any URL")
         sys.exit(2)
 
-    state = AppState(relay_port, web_url=web_lan_url, web_public_url=web_public_url)
+    state = AppState(relay_port, web_url=web_lan_url, web_public_url=web_public_url,
+                     auth_user=auth_user, auth_pass=auth_pass)
     try:
         state.channels = _load_all(sources)
         log.info("loaded %d channels total from %d source(s)",
@@ -114,6 +122,35 @@ def create_app() -> Flask:
     app.config["sources"] = sources
     app.config["tv_ip"] = tv_ip
     app.config["host_ip"] = host_ip
+
+    def _check_basic_auth(header: str | None) -> bool:
+        if not header or not header.startswith("Basic "):
+            return False
+        try:
+            decoded = base64.b64decode(header[6:]).decode("utf-8")
+        except Exception:
+            return False
+        u, _, p = decoded.partition(":")
+        return secrets.compare_digest(u, auth_user) and secrets.compare_digest(p, auth_pass)
+
+    @app.before_request
+    def _require_auth_when_proxied():
+        if not auth_enabled:
+            return None
+        if request.path == "/healthz":
+            return None
+        proxied = any(request.headers.get(h) for h in
+                      ("X-Forwarded-Host", "X-Forwarded-Proto",
+                       "X-Forwarded-For", "Forwarded"))
+        if not proxied:
+            return None
+        if _check_basic_auth(request.headers.get("Authorization")):
+            return None
+        return Response(
+            "auth required\n",
+            status=401,
+            headers={"WWW-Authenticate": 'Basic realm="m3u-stream"'},
+        )
 
     def _ensure_control_url() -> str:
         if not tv_ip:

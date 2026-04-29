@@ -11,4 +11,6 @@ services:
       HOST_IP: ${HOST_IP:-}
       RELAY_BASE_URL: ${RELAY_BASE_URL:-}
       WEB_BASE_URL: ${WEB_BASE_URL:-}
+      AUTH_USER: ${AUTH_USER:-}
+      AUTH_PASS: ${AUTH_PASS:-}
     restart: unless-stopped

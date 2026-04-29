@@ -59,6 +59,7 @@ In bridge mode you **must** set `HOST_IP` explicitly to the host's LAN IP — th
 | `HOST_IP`    | no       | auto             | Auto-detected via `ip route get $TV_IP` (or `1.1.1.1` if no TV). Required in bridge mode. |
 | `RELAY_BASE_URL` | no   | —                | Public base URL for the relay (e.g. `https://stream.example.com`). Used only when the request reaches the app through a reverse proxy (any `X-Forwarded-*` header present). DLNA cast always uses `http://$HOST_IP:$RELAY_PORT`. |
 | `WEB_BASE_URL`   | no   | —                | Public base URL for the web UI (e.g. `https://m3u.example.com`). Used in the relay's "no stream running" 503 page so the link points at the public UI when reached via the proxy. |
+| `AUTH_USER`, `AUTH_PASS` | no | —          | When both are set, HTTP basic auth is required for proxied requests only. LAN-direct requests stay open so DLNA cast / mpv / VLC keep working without credentials. |
 | `IMAGE`      | no       | `m3u-stream:local` | Image reference used by `docker-compose.yml`.                            |
 
 ### Multi-source M3U examples
@@ -100,6 +101,3 @@ The GitHub Actions workflow at `.github/workflows/docker.yml` builds a multi-arc
 - `DOCKERHUB_USERNAME`
 - `DOCKERHUB_TOKEN`
 
-## Credits
-
-Built on top of the streaming workflow originally implemented in `~/bin/neotv` / `~/bin/neotv-stream-server` (ffmpeg HTTP relay + UPnP `AVTransport` SOAP).

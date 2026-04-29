@@ -1,5 +1,7 @@
+import base64
 import http.server
 import logging
+import secrets
 import shutil
 import socket
 import socketserver
@@ -113,6 +115,38 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except Exception:
             pass
 
+    def _is_proxied(self) -> bool:
+        return any(self.headers.get(h) for h in
+                   ("X-Forwarded-Host", "X-Forwarded-Proto",
+                    "X-Forwarded-For", "Forwarded"))
+
+    def _auth_ok(self, relay: "Relay") -> bool:
+        if not relay.auth_enabled or not self._is_proxied():
+            return True
+        header = self.headers.get("Authorization", "")
+        if not header.startswith("Basic "):
+            return False
+        try:
+            decoded = base64.b64decode(header[6:]).decode("utf-8")
+        except Exception:
+            return False
+        u, _, p = decoded.partition(":")
+        return (secrets.compare_digest(u, relay.auth_user)
+                and secrets.compare_digest(p, relay.auth_pass))
+
+    def _send_auth_required(self) -> None:
+        body = b"auth required\n"
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="m3u-stream"')
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self._send_cors_headers()
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except Exception:
+            pass
+
     def do_OPTIONS(self):
         self.send_response(204)
         self._send_cors_headers()
@@ -121,6 +155,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def do_HEAD(self):
         path = self.path.split("?", 1)[0]
         relay: Relay = self.server.relay  # type: ignore[attr-defined]
+        if not self._auth_ok(relay):
+            self._send_auth_required()
+            return
         if relay.source is None:
             self._send_no_stream()
             return
@@ -132,6 +169,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         relay: Relay = self.server.relay  # type: ignore[attr-defined]
+        if not self._auth_ok(relay):
+            self._send_auth_required()
+            return
         if relay.source is None:
             self._send_no_stream()
             return
@@ -264,10 +304,14 @@ class Relay:
       /hls/segNNNNN.ts       HLS segments
     """
 
-    def __init__(self, port: int, web_url: str = "", web_public_url: str = ""):
+    def __init__(self, port: int, web_url: str = "", web_public_url: str = "",
+                 auth_user: str = "", auth_pass: str = ""):
         self.port = port
         self.web_url = web_url or "the m3u-stream web UI"
         self.web_public_url = web_public_url
+        self.auth_user = auth_user
+        self.auth_pass = auth_pass
+        self.auth_enabled = bool(auth_user and auth_pass)
         self._source: str | None = None
         self._hls_dir = Path(tempfile.mkdtemp(prefix="m3u-stream-hls-"))
         self._hls_proc: subprocess.Popen | None = None
