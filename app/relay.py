@@ -1,7 +1,9 @@
 import base64
+import hashlib
 import http.server
 import ipaddress
 import logging
+import re
 import secrets
 import shutil
 import socket
@@ -10,19 +12,25 @@ import subprocess
 import tempfile
 import threading
 import time
+import urllib.parse
 from pathlib import Path
+from typing import Callable, Optional
 
 log = logging.getLogger("m3u-stream.relay")
 
 HLS_IDLE_TIMEOUT = 30.0   # stop ffmpeg(hls) after this many seconds without a request
 HLS_INITIAL_WAIT = 10.0   # wait this long for the first playlist to appear
 
+_HLS_RE = re.compile(r"^/([^/]+)/(stream\.m3u8|seg\d+\.ts)$")
+_STREAM_RE = re.compile(r"^/([^/]+)/stream\.(mp4|ts)$")
+
 
 def _is_ios_ua(ua: str) -> bool:
-    """Match iOS Safari / iOS Chrome (all iOS browsers use WebKit). iPadOS
-    13+ on iPad sometimes masquerades as desktop Safari and is undetectable
-    from UA alone — that case is handled by the index page's JS instead."""
     return any(x in ua for x in ("iPhone", "iPad", "iPod", "CPU OS", "iPhone OS"))
+
+
+def _safe_dirname(channel_id: str) -> str:
+    return hashlib.sha1(channel_id.encode("utf-8")).hexdigest()[:16]
 
 
 def _ffmpeg_cmd(source_url: str, output: str) -> list[str]:
@@ -60,6 +68,14 @@ def _ffmpeg_hls_cmd(source_url: str, hls_dir: Path) -> list[str]:
     ]
 
 
+class _StreamCtx:
+    def __init__(self, source_url: str, hls_dir: Path):
+        self.source_url = source_url
+        self.hls_dir = hls_dir
+        self.hls_proc: subprocess.Popen | None = None
+        self.hls_last_request_at: float = 0.0
+
+
 class _Handler(http.server.BaseHTTPRequestHandler):
     timeout = 60
 
@@ -78,44 +94,6 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return "video/mp2t"
         return "video/mpeg"
 
-    def _send_no_stream(self) -> None:
-        relay: Relay = self.server.relay  # type: ignore[attr-defined]
-        proxied = any(self.headers.get(h) for h in
-                      ("X-Forwarded-Host", "X-Forwarded-Proto",
-                       "X-Forwarded-For", "Forwarded"))
-        web_url = relay.web_public_url if proxied and relay.web_public_url else relay.web_url
-        wants_html = "text/html" in self.headers.get("Accept", "")
-        if wants_html:
-            from html import escape
-            body = (
-                "<!doctype html><meta charset='utf-8'>"
-                "<title>m3u-stream — no stream</title>"
-                "<style>body{font-family:system-ui,sans-serif;background:#111;color:#eee;"
-                "padding:2rem;line-height:1.5}a{color:#6ce}</style>"
-                "<h1>No stream is currently running</h1>"
-                f"<p>Open <a href=\"{escape(web_url)}\">{escape(web_url)}</a>, "
-                "pick a channel, and start a stream (Cast to TV / Start stream / "
-                "Watch in browser) first.</p>"
-            ).encode("utf-8")
-            content_type = "text/html; charset=utf-8"
-        else:
-            body = (
-                "No stream is currently running.\n\n"
-                f"Open {web_url} , pick a channel, and start a stream "
-                "(Cast to TV / Start stream / Watch in browser) first.\n"
-            ).encode("utf-8")
-            content_type = "text/plain; charset=utf-8"
-        self.send_response(503)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Retry-After", "5")
-        self._send_cors_headers()
-        self.end_headers()
-        try:
-            self.wfile.write(body)
-        except Exception:
-            pass
-
     def _is_proxied(self) -> bool:
         return any(self.headers.get(h) for h in
                    ("X-Forwarded-Host", "X-Forwarded-Proto",
@@ -124,7 +102,6 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _auth_ok(self, relay: "Relay") -> bool:
         if not relay.auth_enabled or not self._is_proxied():
             return True
-        # LAN clients reaching us via the proxy still skip auth.
         xff = (self.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
         if xff:
             try:
@@ -152,10 +129,39 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self._send_cors_headers()
         self.end_headers()
-        try:
-            self.wfile.write(body)
-        except Exception:
-            pass
+        try: self.wfile.write(body)
+        except Exception: pass
+
+    def _send_no_stream(self) -> None:
+        relay: Relay = self.server.relay  # type: ignore[attr-defined]
+        proxied = self._is_proxied()
+        web_url = relay.web_public_url if proxied and relay.web_public_url else relay.web_url
+        wants_html = "text/html" in self.headers.get("Accept", "")
+        if wants_html:
+            from html import escape
+            body = (
+                "<!doctype html><meta charset='utf-8'>"
+                "<title>m3u-stream</title>"
+                "<style>body{font-family:system-ui,sans-serif;background:#111;color:#eee;"
+                "padding:2rem;line-height:1.5}a{color:#6ce}</style>"
+                "<h1>m3u-stream relay</h1>"
+                f"<p>Open <a href=\"{escape(web_url)}\">{escape(web_url)}</a> to pick a channel.</p>"
+            ).encode("utf-8")
+            content_type = "text/html; charset=utf-8"
+        else:
+            body = (
+                "m3u-stream relay.\n"
+                f"Open {web_url} to pick a channel.\n"
+            ).encode("utf-8")
+            content_type = "text/plain; charset=utf-8"
+        self.send_response(503)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Retry-After", "5")
+        self._send_cors_headers()
+        self.end_headers()
+        try: self.wfile.write(body)
+        except Exception: pass
 
     def do_OPTIONS(self):
         self.send_response(204)
@@ -163,53 +169,63 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_HEAD(self):
-        path = self.path.split("?", 1)[0]
         relay: Relay = self.server.relay  # type: ignore[attr-defined]
         if not self._auth_ok(relay):
             self._send_auth_required()
             return
-        if relay.source is None:
-            self._send_no_stream()
+        path = self.path.split("?", 1)[0]
+        if _HLS_RE.match(path) or _STREAM_RE.match(path):
+            self.send_response(200)
+            self.send_header("Content-Type", self._content_type_for(path))
+            self._send_cors_headers()
+            self.end_headers()
             return
-        self.send_response(200)
-        self.send_header("Content-Type", self._content_type_for(path))
-        self._send_cors_headers()
-        self.end_headers()
+        self._send_no_stream()
 
     def do_GET(self):
-        path = self.path.split("?", 1)[0]
         relay: Relay = self.server.relay  # type: ignore[attr-defined]
         if not self._auth_ok(relay):
             self._send_auth_required()
             return
-        if relay.source is None:
-            self._send_no_stream()
+        path = self.path.split("?", 1)[0]
+
+        m = _HLS_RE.match(path)
+        if m:
+            channel_id = urllib.parse.unquote(m.group(1))
+            self._serve_hls(channel_id, m.group(2), relay)
             return
-        if path.startswith("/hls/"):
-            self._serve_hls(path, relay)
-            return
-        if path.endswith(".mp4"):
-            # iOS WebKit can't play live fragmented MP4 — redirect to HLS,
-            # which iOS plays natively.
-            if _is_ios_ua(self.headers.get("User-Agent", "")):
+
+        m = _STREAM_RE.match(path)
+        if m:
+            channel_id = urllib.parse.unquote(m.group(1))
+            fmt = m.group(2)
+            # iOS WebKit can't play live fMP4 → redirect to per-channel HLS.
+            if fmt == "mp4" and _is_ios_ua(self.headers.get("User-Agent", "")):
+                enc = urllib.parse.quote(channel_id, safe="")
                 self.send_response(302)
-                self.send_header("Location", "/hls/stream.m3u8")
+                self.send_header("Location", f"/{enc}/stream.m3u8")
                 self.send_header("Cache-Control", "no-store")
                 self._send_cors_headers()
                 self.end_headers()
                 return
-            self._serve_ffmpeg_pipe(relay.source, "mp4", "video/mp4")
+            ctx = relay.get_or_create_stream(channel_id)
+            if ctx is None:
+                self.send_error(404, "unknown channel")
+                return
+            kind = "mp4" if fmt == "mp4" else "mpegts"
+            ct = "video/mp4" if fmt == "mp4" else "video/mpeg"
+            self._serve_ffmpeg_pipe(ctx.source_url, kind, ct)
             return
-        self._serve_ffmpeg_pipe(relay.source, "mpegts", "video/mpeg")
 
-    def _serve_hls(self, path: str, relay: "Relay"):
-        hls_dir = relay.ensure_hls()
-        rel = path[len("/hls/"):]
-        if rel != "stream.m3u8" and not (rel.startswith("seg") and rel.endswith(".ts")):
-            self.send_error(404)
+        self._send_no_stream()
+
+    def _serve_hls(self, channel_id: str, rel: str, relay: "Relay"):
+        ctx = relay.ensure_hls(channel_id)
+        if ctx is None:
+            self.send_error(404, "unknown channel")
             return
-        target = hls_dir / rel
         wait = HLS_INITIAL_WAIT if rel == "stream.m3u8" else 5.0
+        target = ctx.hls_dir / rel
         if not target.exists():
             deadline = time.time() + wait
             while time.time() < deadline and not target.exists():
@@ -228,10 +244,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store" if rel.endswith(".m3u8") else "public, max-age=10")
         self._send_cors_headers()
         self.end_headers()
-        try:
-            self.wfile.write(data)
-        except Exception:
-            pass
+        try: self.wfile.write(data)
+        except Exception: pass
 
     def _serve_ffmpeg_pipe(self, source_url: str, kind: str, content_type: str):
         proc = subprocess.Popen(
@@ -268,10 +282,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self._send_cors_headers()
             self.end_headers()
-            try:
-                self.wfile.write(body)
-            except Exception:
-                pass
+            try: self.wfile.write(body)
+            except Exception: pass
             proc.kill()
             return
 
@@ -303,19 +315,22 @@ class _ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
 
 
 class Relay:
-    """Long-running HTTP relay. The TCP server is always listening so that
-    a client hitting /stream.ts /stream.mp4 /hls/* before any stream has
-    been started gets a friendly 503 instead of a connection error.
+    """Long-running multi-channel HTTP relay.
 
     Paths served on the relay port:
-      /stream.ts             MPEG-TS (TV cast, mpv)
-      /stream.mp4            fragmented MP4 (Chrome native playback)
-      /hls/stream.m3u8       HLS playlist (iOS / Safari native playback)
-      /hls/segNNNNN.ts       HLS segments
+      /<id>/stream.ts         MPEG-TS for the channel with the given id
+      /<id>/stream.mp4        Fragmented MP4 (iOS clients are 302'd to HLS)
+      /<id>/stream.m3u8       HLS playlist
+      /<id>/segNNNNN.ts       HLS segments
+
+    The TCP server is always listening; a request for an unknown path
+    returns a 503 friendly page pointing at the web UI.
     """
 
     def __init__(self, port: int, web_url: str = "", web_public_url: str = "",
-                 auth_user: str = "", auth_pass: str = "", auth_trusted_nets=None):
+                 auth_user: str = "", auth_pass: str = "",
+                 auth_trusted_nets=None,
+                 resolve_url: Optional[Callable[[str], Optional[str]]] = None):
         self.port = port
         self.web_url = web_url or "the m3u-stream web UI"
         self.web_public_url = web_public_url
@@ -323,11 +338,11 @@ class Relay:
         self.auth_pass = auth_pass
         self.auth_enabled = bool(auth_user and auth_pass)
         self.auth_trusted_nets = list(auth_trusted_nets or [])
-        self._source: str | None = None
-        self._hls_dir = Path(tempfile.mkdtemp(prefix="m3u-stream-hls-"))
-        self._hls_proc: subprocess.Popen | None = None
-        self._hls_lock = threading.Lock()
-        self._hls_last_request_at: float = 0.0
+        self.resolve_url = resolve_url or (lambda _id: None)
+
+        self._base_hls_dir = Path(tempfile.mkdtemp(prefix="m3u-stream-hls-"))
+        self._streams: dict[str, _StreamCtx] = {}
+        self._lock = threading.Lock()
 
         server = _ThreadedTCPServer(("", port), _Handler)
         server.relay = self  # type: ignore[attr-defined]
@@ -336,102 +351,111 @@ class Relay:
         self._server = server
         self._thread = thread
         self._wait_for_listen()
+        threading.Thread(target=self._idle_watcher, daemon=True).start()
 
-        # Idle watcher to stop ffmpeg(hls) when no /hls/ traffic for a while.
-        threading.Thread(target=self._hls_idle_watcher, daemon=True).start()
+    def get_or_create_stream(self, channel_id: str) -> _StreamCtx | None:
+        with self._lock:
+            ctx = self._streams.get(channel_id)
+            if ctx is not None:
+                return ctx
+            url = self.resolve_url(channel_id)
+            if not url:
+                return None
+            hls_dir = self._base_hls_dir / _safe_dirname(channel_id)
+            hls_dir.mkdir(parents=True, exist_ok=True)
+            ctx = _StreamCtx(url, hls_dir)
+            self._streams[channel_id] = ctx
+            log.info("relay added channel %s", channel_id)
+            return ctx
 
-    @property
-    def running(self) -> bool:
-        return self._source is not None
-
-    @property
-    def source(self) -> str | None:
-        return self._source
-
-    def start(self, source_url: str) -> None:
-        """Set / switch the upstream source. The HTTP server stays up
-        regardless; only the source URL changes."""
-        if self._source == source_url:
-            return
-        # If the previous source was different, kill its HLS ffmpeg so the
-        # next /hls/ request spawns a fresh one for the new source.
-        self._stop_hls()
-        self._source = source_url
-        log.info("relay source = %s", source_url)
-
-    def stop(self) -> None:
-        """Clear the source. Subsequent /stream.* requests will get 503."""
-        if self._source is None and self._hls_proc is None:
-            return
-        log.info("relay source cleared")
-        self._source = None
-        self._stop_hls()
+    def ensure_hls(self, channel_id: str) -> _StreamCtx | None:
+        with self._lock:
+            ctx = self._streams.get(channel_id)
+            if ctx is None:
+                url = self.resolve_url(channel_id)
+                if not url:
+                    return None
+                hls_dir = self._base_hls_dir / _safe_dirname(channel_id)
+                hls_dir.mkdir(parents=True, exist_ok=True)
+                ctx = _StreamCtx(url, hls_dir)
+                self._streams[channel_id] = ctx
+            ctx.hls_last_request_at = time.time()
+            running = ctx.hls_proc is not None and ctx.hls_proc.poll() is None
+            if not running:
+                log.info("starting ffmpeg(hls) for channel %s", channel_id)
+                self._start_hls(ctx)
+            return ctx
 
     def shutdown(self) -> None:
-        """Final teardown — used when the process is exiting."""
-        self.stop()
+        with self._lock:
+            for ctx in self._streams.values():
+                self._stop_hls(ctx)
+            self._streams.clear()
         try:
             self._server.shutdown()
             self._server.server_close()
         except Exception:
             pass
-        shutil.rmtree(self._hls_dir, ignore_errors=True)
+        shutil.rmtree(self._base_hls_dir, ignore_errors=True)
 
-    def ensure_hls(self) -> Path:
-        """Called by the HTTP handler on each /hls/ request. Starts ffmpeg(hls)
-        if it isn't already running for the current source, and bumps the
-        last-activity timestamp."""
-        with self._hls_lock:
-            self._hls_last_request_at = time.time()
-            if self._source is None:
-                raise RuntimeError("no source set")
-            running = self._hls_proc is not None and self._hls_proc.poll() is None
-            if not running:
-                log.info("starting ffmpeg(hls) on demand for %s", self._source)
-                self._start_hls(self._source, self._hls_dir)
-            return self._hls_dir
+    # Cast / status helpers used by the rest of the app
+    def stop_channel(self, channel_id: str) -> None:
+        """Tear down a single channel's HLS and remove its state."""
+        with self._lock:
+            ctx = self._streams.pop(channel_id, None)
+        if ctx is None:
+            return
+        self._stop_hls(ctx)
+        shutil.rmtree(ctx.hls_dir, ignore_errors=True)
+        log.info("relay removed channel %s", channel_id)
 
-    def _hls_idle_watcher(self) -> None:
+    def _idle_watcher(self) -> None:
         while True:
             time.sleep(5)
-            with self._hls_lock:
-                if self._hls_proc is None or self._hls_proc.poll() is not None:
-                    continue
-                if self._hls_last_request_at == 0:
-                    continue
-                if time.time() - self._hls_last_request_at > HLS_IDLE_TIMEOUT:
-                    log.info("HLS idle for %.0fs, stopping ffmpeg(hls)", HLS_IDLE_TIMEOUT)
-                    self._stop_hls()
+            now = time.time()
+            to_clean: list[str] = []
+            with self._lock:
+                for cid, ctx in list(self._streams.items()):
+                    if ctx.hls_proc is None or ctx.hls_proc.poll() is not None:
+                        # HLS not running for this channel — leave the StreamCtx
+                        # in place, it's just URL bookkeeping.
+                        continue
+                    if ctx.hls_last_request_at == 0:
+                        continue
+                    if now - ctx.hls_last_request_at > HLS_IDLE_TIMEOUT:
+                        log.info("HLS idle for channel %s, stopping ffmpeg", cid)
+                        self._stop_hls(ctx)
+                        to_clean.append(cid)
+            for cid in to_clean:
+                # Drop the cached state so next request rebuilds with a fresh
+                # source URL lookup (the upstream may have moved).
+                self.stop_channel(cid)
 
-    def _start_hls(self, source_url: str, hls_dir: Path) -> None:
-        for f in hls_dir.iterdir():
-            try:
-                f.unlink()
-            except OSError:
-                pass
-        cmd = _ffmpeg_hls_cmd(source_url, hls_dir)
-        self._hls_proc = subprocess.Popen(
+    def _start_hls(self, ctx: _StreamCtx) -> None:
+        for f in ctx.hls_dir.iterdir():
+            try: f.unlink()
+            except OSError: pass
+        cmd = _ffmpeg_hls_cmd(ctx.source_url, ctx.hls_dir)
+        ctx.hls_proc = subprocess.Popen(
             cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
         )
 
         def _drain():
-            assert self._hls_proc and self._hls_proc.stderr
-            for line in self._hls_proc.stderr:
+            assert ctx.hls_proc and ctx.hls_proc.stderr
+            for line in ctx.hls_proc.stderr:
                 log.warning("ffmpeg(hls): %s", line.rstrip().decode(errors="replace"))
 
         threading.Thread(target=_drain, daemon=True).start()
 
-    def _stop_hls(self) -> None:
-        if self._hls_proc is not None:
+    def _stop_hls(self, ctx: _StreamCtx) -> None:
+        if ctx.hls_proc is not None:
             try:
-                self._hls_proc.terminate()
-                try:
-                    self._hls_proc.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    self._hls_proc.kill()
+                ctx.hls_proc.terminate()
+                try: ctx.hls_proc.wait(timeout=2)
+                except subprocess.TimeoutExpired: ctx.hls_proc.kill()
             except Exception:
                 pass
-        self._hls_proc = None
+        ctx.hls_proc = None
 
     def _wait_for_listen(self, timeout: float = 5.0) -> None:
         deadline = time.time() + timeout

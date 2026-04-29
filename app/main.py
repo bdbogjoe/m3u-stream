@@ -111,9 +111,9 @@ def create_app() -> Flask:
     log.info("web UI (LAN)  = %s", web_lan_url)
     if web_public_url:
         log.info("web UI (public)= %s", web_public_url)
-    log.info("relay (LAN)   = %s/stream.ts   /stream.mp4   /hls/stream.m3u8", lan_base_url)
+    log.info("relay (LAN)   = %s/<id>/stream.{ts,mp4,m3u8}", lan_base_url)
     if relay_base_url_env:
-        log.info("relay (public)= %s/stream.ts   /stream.mp4   /hls/stream.m3u8", relay_base_url_env)
+        log.info("relay (public)= %s/<id>/stream.{ts,mp4,m3u8}", relay_base_url_env)
 
     sources = _parse_sources(m3u_url)
     if not sources:
@@ -186,10 +186,6 @@ def create_app() -> Flask:
             log.info("AVTransport control URL: %s", state.control_url)
         return state.control_url
 
-    # LAN-direct URL used for DLNA cast — the TV needs to reach the relay
-    # by IP and won't resolve an external/proxied hostname.
-    cast_stream_url = f"{lan_base_url}/stream.ts"
-
     def _is_proxied() -> bool:
         h = request.headers
         return any(h.get(x) for x in ("X-Forwarded-Host", "X-Forwarded-Proto",
@@ -200,37 +196,43 @@ def create_app() -> Flask:
             return relay_base_url_env
         return lan_base_url
 
+    def _enc(cid: str) -> str:
+        from urllib.parse import quote
+        return quote(cid, safe="")
+
+    def _cast_stream_url(channel) -> str:
+        # LAN-direct: the TV won't resolve an external/proxied hostname.
+        return f"{lan_base_url}/{_enc(channel.id)}/stream.ts"
+
     def _channel_dto(c):
-        return {"id": c.id, "name": c.name, "group": c.group,
-                "logo": c.logo, "source": c.source, "url": c.url}
+        base = _public_base()
+        cid_enc = _enc(c.id)
+        return {
+            "id": c.id, "name": c.name, "group": c.group,
+            "logo": c.logo, "source": c.source, "url": c.url,
+            "watch_mp4_url": f"{base}/{cid_enc}/stream.mp4",
+            "watch_hls_url": f"{base}/{cid_enc}/stream.m3u8",
+        }
 
     def _status_dto():
-        base = _public_base()
         return {
             "current": _channel_dto(state.current) if state.current else None,
             "casting": state.casting,
-            "streaming": state.relay.running,
-            "stream_url": f"{base}/stream.ts" if state.relay.running else None,
-            "mp4_url": f"{base}/stream.mp4" if state.relay.running else None,
-            "hls_url": f"{base}/hls/stream.m3u8" if state.relay.running else None,
             "cast_enabled": bool(tv_ip),
         }
 
-    def _stop_everything() -> None:
+    def _stop_cast() -> None:
         if state.casting and state.control_url:
             try:
                 dlna.stop(state.control_url)
             except Exception as e:
                 log.warning("dlna stop failed: %s", e)
+        if state.casting and state.current is not None:
+            # Drop the cast channel's relay state so its HLS ffmpeg (if any)
+            # is killed and the upstream isn't held open.
+            state.relay.stop_channel(state.current.id)
         state.casting = False
-        state.relay.stop()
         state.current = None
-
-    def _start_relay(channel) -> None:
-        if state.relay.running:
-            _stop_everything()
-        state.relay.start(channel.url)
-        state.current = channel
 
     # 1×1 transparent PNG, returned in place of any logo we couldn't fetch
     # so the browser network panel doesn't fill up with red 4xx/5xx rows.
@@ -265,10 +267,13 @@ def create_app() -> Flask:
 
     @app.get("/")
     def index():
-        channels = sorted(
+        channels_sorted = sorted(
             state.channels,
             key=lambda c: (c.source.lower(), c.group.lower(), c.name.lower()),
         )
+        # Pre-build watch URLs server-side so the template can render them
+        # directly without computing per-channel URLs in Jinja.
+        channels = [_channel_dto(c) for c in channels_sorted]
         groups = sorted(m3u.groups(state.channels), key=str.lower)
         srcs = sorted(m3u.sources(state.channels), key=str.lower)
         return render_template(
@@ -277,8 +282,6 @@ def create_app() -> Flask:
             groups=groups,
             sources=srcs,
             status=_status_dto(),
-            mp4_url=f"{_public_base()}/stream.mp4",
-            hls_url=f"{_public_base()}/hls/stream.m3u8",
         )
 
     @app.get("/healthz")
@@ -304,31 +307,15 @@ def create_app() -> Flask:
             except Exception as e:
                 return jsonify(ok=False, error=f"discovery: {e}"), 502
             try:
-                _start_relay(channel)
-                dlna.set_uri(control_url, cast_stream_url, channel.name)
+                # Switch cast target → tear down any previous one first.
+                _stop_cast()
+                dlna.set_uri(control_url, _cast_stream_url(channel), channel.name)
                 dlna.play(control_url)
+                state.current = channel
                 state.casting = True
             except Exception as e:
-                _stop_everything()
+                _stop_cast()
                 log.exception("cast failed")
-                return jsonify(ok=False, error=str(e)), 502
-        return jsonify(ok=True, **_status_dto())
-
-    @app.post("/stream")
-    def stream_route():
-        data = request.get_json(silent=True) or {}
-        cid = data.get("channel_id")
-        if not cid:
-            return jsonify(ok=False, error="channel_id required"), 400
-        channel = state.channel_by_id(cid)
-        if channel is None:
-            return jsonify(ok=False, error="unknown channel"), 404
-        with state.lock:
-            try:
-                _start_relay(channel)
-            except Exception as e:
-                _stop_everything()
-                log.exception("stream start failed")
                 return jsonify(ok=False, error=str(e)), 502
         return jsonify(ok=True, **_status_dto())
 
@@ -336,7 +323,7 @@ def create_app() -> Flask:
     def stop_route():
         with state.lock:
             try:
-                _stop_everything()
+                _stop_cast()
             except Exception as e:
                 log.exception("stop failed")
                 return jsonify(ok=False, error=str(e)), 502

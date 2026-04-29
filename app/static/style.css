@@ -58,12 +58,19 @@ main { padding: 1rem 1.5rem; }
   border-radius: 6px;
   padding: 0.6rem;
   display: grid;
-  grid-template-columns: 56px 1fr;
+  grid-template-columns: 56px 1fr auto;
   align-items: center;
   gap: 0.6rem;
   cursor: pointer;
   user-select: none;
 }
+.tile .watch-btn {
+  background: #222; color: #6ce; border: 1px solid #2a3a4a;
+  width: 36px; height: 36px; border-radius: 50%;
+  font-size: 0.95rem; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.tile .watch-btn:hover { background: #2a3a4a; color: #9be; }
 .tile:hover { border-color: #444; }
 .tile.hidden { display: none; }
 .tile.selected { border-color: #ec6; box-shadow: 0 0 0 1px #ec6 inset; }

@@ -4,20 +4,19 @@
   const sourceSel = document.getElementById('source-filter');
   const searchInp = document.getElementById('search');
   const reloadBtn = document.getElementById('reload-btn');
-  const castBtn = document.getElementById('cast-btn');           // may be null when TV_IP is unset
-  const streamBtn = document.getElementById('stream-btn');
-  const watchBtn = document.getElementById('watch-btn');
-  const stopBtn = document.getElementById('stop-btn');
+  const castBtn = document.getElementById('cast-btn');           // null when TV_IP unset
+  const stopBtn = document.getElementById('stop-btn');           // null when TV_IP unset
   const statusEl = document.getElementById('status');
   const selectedName = document.getElementById('selected-name');
   const nowPlaying = document.getElementById('now-playing');
   const nowPlayingName = document.getElementById('now-playing-name');
-  const nowPlayingState = document.getElementById('now-playing-state');
-  const nowPlayingLink = document.getElementById('now-playing-stream-link');
   const grid = document.getElementById('grid');
 
   const allTiles = Array.from(grid.querySelectorAll('.tile'));
   let selectedTile = null;
+
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
   const setStatus = (msg, isError = false) => {
     statusEl.textContent = msg || '';
@@ -25,12 +24,8 @@
   };
 
   const updateActionButtons = () => {
-    const hasSelection = !!selectedTile;
-    if (castBtn) castBtn.disabled = !hasSelection;
-    streamBtn.disabled = !hasSelection;
-    watchBtn.disabled = !hasSelection;
-    // Stop is enabled whenever something is playing
-    stopBtn.disabled = !nowPlaying.dataset.currentId;
+    if (castBtn) castBtn.disabled = !selectedTile;
+    if (stopBtn) stopBtn.disabled = !nowPlaying.dataset.currentId;
   };
 
   const setSelected = (tile) => {
@@ -52,16 +47,7 @@
       if (tile) tile.classList.add('current');
       nowPlaying.dataset.currentId = s.current.id;
       nowPlaying.dataset.casting = s.casting ? '1' : '';
-      nowPlaying.dataset.streaming = s.streaming ? '1' : '';
-      nowPlaying.dataset.streamUrl = s.stream_url || '';
       nowPlayingName.textContent = s.current.name;
-      nowPlayingState.textContent = s.casting ? 'Casting:' : (s.streaming ? 'Streaming:' : '');
-      if (s.stream_url) {
-        nowPlayingLink.href = s.stream_url;
-        nowPlayingLink.hidden = false;
-      } else {
-        nowPlayingLink.hidden = true;
-      }
       nowPlaying.hidden = false;
     } else {
       nowPlaying.dataset.currentId = '';
@@ -105,15 +91,18 @@
   searchInp.addEventListener('input', applyFilter);
 
   grid.addEventListener('click', (e) => {
+    const watch = e.target.closest('.watch-btn');
+    if (watch) {
+      const tile = watch.closest('.tile');
+      if (!tile) return;
+      const url = isIOS ? tile.dataset.watchHls : tile.dataset.watchMp4;
+      window.open(url, '_blank', 'noopener');
+      e.stopPropagation();
+      return;
+    }
     const tile = e.target.closest('.tile');
     if (!tile) return;
     setSelected(tile);
-  });
-  grid.addEventListener('dblclick', (e) => {
-    const tile = e.target.closest('.tile');
-    if (!tile) return;
-    setSelected(tile);
-    castBtn.click();
   });
 
   const postJson = async (path, body) => {
@@ -139,50 +128,7 @@
     finally { updateActionButtons(); }
   });
 
-  streamBtn.addEventListener('click', async () => {
-    if (!selectedTile) return;
-    setStatus('Starting stream…');
-    streamBtn.disabled = true;
-    try {
-      const j = await postJson('/stream', { channel_id: selectedTile.dataset.id });
-      renderStatus(j);
-      setStatus('Streaming.');
-    } catch (err) { setStatus(err.message, true); }
-    finally { updateActionButtons(); }
-  });
-
-  const MAIN_EL = document.querySelector('main');
-  const MP4_URL = MAIN_EL.dataset.mp4Url || '';
-  const HLS_URL = MAIN_EL.dataset.hlsUrl || '';
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-
-  watchBtn.addEventListener('click', async () => {
-    if (!selectedTile) return;
-    setStatus('Starting stream…');
-    watchBtn.disabled = true;
-    // Open the tab synchronously so the popup blocker allows it; we'll
-    // navigate to the playback URL once the relay is up.
-    const win = window.open('about:blank', '_blank');
-    try {
-      const j = await postJson('/stream', { channel_id: selectedTile.dataset.id });
-      renderStatus(j);
-      // iOS WebKit plays HLS natively; everything else gets fragmented MP4.
-      const fallback = isIOS ? HLS_URL : MP4_URL;
-      const target = (isIOS ? j.hls_url : j.mp4_url) || fallback;
-      if (!target) { setStatus('no playback URL', true); if (win) win.close(); return; }
-      const url = target + (target.includes('?') ? '&' : '?') + 't=' + Date.now();
-      if (win) win.location.href = url;
-      setStatus('Streaming.');
-    } catch (err) {
-      if (win) win.close();
-      setStatus(err.message, true);
-    } finally {
-      updateActionButtons();
-    }
-  });
-
-  stopBtn.addEventListener('click', async () => {
+  if (stopBtn) stopBtn.addEventListener('click', async () => {
     setStatus('Stopping…');
     try {
       const j = await postJson('/stop');

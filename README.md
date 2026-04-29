@@ -85,15 +85,14 @@ You'll need `ffmpeg` and `iproute2` available on the host.
 | Method | Path                | Notes                                                  |
 |--------|---------------------|--------------------------------------------------------|
 | GET    | `/`                 | Web UI.                                                |
-| GET    | `/status`           | JSON: current channel, casting/streaming flags, URLs.  |
-| POST   | `/cast`             | `{channel_id}` — start relay + DLNA cast.              |
-| POST   | `/stream`           | `{channel_id}` — start relay only.                     |
-| POST   | `/stop`             | Stop relay and DLNA cast.                              |
+| GET    | `/status`           | JSON: cast status (`current`, `casting`).              |
+| POST   | `/cast`             | `{channel_id}` — DLNA cast that channel to the TV.     |
+| POST   | `/stop`             | Stop the DLNA cast.                                    |
 | POST   | `/reload`           | Re-fetch all configured M3U URLs.                      |
 | GET    | `/healthz`          | Liveness probe.                                        |
-| GET    | `:RELAY_PORT/stream.ts`  | MPEG-TS relay (TV cast / mpv / VLC).              |
-| GET    | `:RELAY_PORT/stream.mp4` | Fragmented MP4 relay (Chrome native playback).    |
-| GET    | `:RELAY_PORT/hls/stream.m3u8` | HLS playlist (iOS / Safari native playback). |
+| GET    | `:RELAY_PORT/<id>/stream.ts`   | MPEG-TS for a channel (TV cast / mpv / VLC). |
+| GET    | `:RELAY_PORT/<id>/stream.mp4`  | Fragmented MP4 (Chrome native; iOS 302→HLS). |
+| GET    | `:RELAY_PORT/<id>/stream.m3u8` | HLS playlist for a channel.                  |
 
 ## Releases
 

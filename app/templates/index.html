@@ -32,27 +32,21 @@
     <div class="buttons">
       {% if status.cast_enabled %}
       <button id="cast-btn" type="button" disabled>Cast to TV</button>
+      <button id="stop-btn" type="button" disabled>Stop cast</button>
       {% endif %}
-      <button id="stream-btn" type="button" disabled>Start stream</button>
-      <button id="watch-btn" type="button" disabled>Watch in browser</button>
-      <button id="stop-btn" type="button" disabled>Stop</button>
     </div>
   </div>
 
   <div id="now-playing"
        data-current-id="{{ status.current.id if status.current else '' }}"
        data-casting="{{ '1' if status.casting else '' }}"
-       data-streaming="{{ '1' if status.streaming else '' }}"
-       data-stream-url="{{ status.stream_url or '' }}"
        {% if not status.current %}hidden{% endif %}>
-    <span id="now-playing-state"></span>
+    <span id="now-playing-state">Casting:</span>
     <strong id="now-playing-name">{{ status.current.name if status.current else '' }}</strong>
-    <a id="now-playing-stream-link" href="{{ status.stream_url or '' }}" target="_blank"
-       {% if not status.streaming %}hidden{% endif %}>relay URL</a>
   </div>
 </header>
 
-<main data-mp4-url="{{ mp4_url }}" data-hls-url="{{ hls_url }}">
+<main>
   <div id="grid">
     {% for c in channels %}
     <div class="tile{% if status.current and c.id == status.current.id %} current{% endif %}"
@@ -60,7 +54,8 @@
          data-name="{{ c.name|lower }}"
          data-group="{{ c.group }}"
          data-source="{{ c.source }}"
-         data-url="{{ c.url }}"
+         data-watch-mp4="{{ c.watch_mp4_url }}"
+         data-watch-hls="{{ c.watch_hls_url }}"
          tabindex="0">
       <div class="logo">
         {% if c.logo %}<img loading="lazy" src="{{ url_for('logo_route', url=c.logo) }}" alt=""
@@ -70,6 +65,7 @@
         <div class="name">{{ c.name }}</div>
         <div class="group">{{ c.group }}</div>
       </div>
+      <button class="watch-btn" type="button" title="Watch in browser">▶</button>
     </div>
     {% endfor %}
   </div>
