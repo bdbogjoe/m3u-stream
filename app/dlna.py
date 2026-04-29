@@ -79,7 +79,7 @@ def _soap(control_url: str, action: str, body_inner: str) -> requests.Response |
     }
     try:
         return requests.post(control_url, data=envelope, headers=headers,
-                             timeout=(5, 30))
+                             timeout=(5, 8))
     except requests.exceptions.ReadTimeout:
         log.warning("SOAP %s: TV did not ack in time (continuing anyway)", action)
         return None
