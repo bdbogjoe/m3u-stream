@@ -96,8 +96,7 @@
     if (watch) {
       const tile = watch.closest('.tile');
       if (!tile) return;
-      const url = isIOS ? tile.dataset.watchHls : tile.dataset.watchMp4;
-      window.open(url, '_blank', 'noopener');
+      window.open(tile.dataset.watchUrl, '_blank', 'noopener');
       e.stopPropagation();
       return;
     }

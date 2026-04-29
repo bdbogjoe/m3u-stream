@@ -135,16 +135,34 @@ class EPG:
                 return p
         return None
 
+    def _next_for_id(self, cid: str) -> Programme | None:
+        now = datetime.now(timezone.utc)
+        with self._lock:
+            progs = self._programmes.get(cid, [])
+        # Programmes are sorted by start time at refresh time.
+        for p in progs:
+            if p.start > now:
+                return p
+        return None
+
     def current(self, tvg_id: str = "", channel_name: str = "") -> Programme | None:
         if tvg_id:
             p = self._current_for_id(tvg_id)
             if p is not None:
                 return p
-        if channel_name:
-            with self._lock:
-                cid = self._name_to_id.get(_norm(channel_name))
-            if cid:
-                return self._current_for_id(cid)
+        cid = self.id_for(channel_name)
+        if cid:
+            return self._current_for_id(cid)
+        return None
+
+    def next(self, tvg_id: str = "", channel_name: str = "") -> Programme | None:
+        if tvg_id:
+            p = self._next_for_id(tvg_id)
+            if p is not None:
+                return p
+        cid = self.id_for(channel_name)
+        if cid:
+            return self._next_for_id(cid)
         return None
 
     def format_current(self, tvg_id: str = "", channel_name: str = "") -> str | None:
@@ -152,6 +170,12 @@ class EPG:
         if p is None:
             return None
         return f"{p.title} · until {p.stop.astimezone().strftime('%H:%M')}"
+
+    def format_next(self, tvg_id: str = "", channel_name: str = "") -> str | None:
+        p = self.next(tvg_id=tvg_id, channel_name=channel_name)
+        if p is None:
+            return None
+        return f"{p.title} · at {p.start.astimezone().strftime('%H:%M')}"
 
     def id_for(self, channel_name: str) -> str | None:
         """Return the XMLTV channel id matching a channel name, or None."""

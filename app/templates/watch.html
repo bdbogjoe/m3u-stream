@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}{{ channel.name }} — m3u-stream{% endblock %}
+{% block content %}
+<div class="watch">
+  <header class="watch-header">
+    <a href="/" class="back">← back</a>
+    <div class="watch-info">
+      {% if channel.logo %}
+      <img class="watch-logo" src="{{ url_for('logo_route', url=channel.logo) }}" alt=""
+           onerror="this.style.display='none'">
+      {% endif %}
+      <div class="watch-meta">
+        <h1>{{ channel.name }}</h1>
+        <div class="watch-group">{{ channel.group }}{% if channel.source %} · {{ channel.source }}{% endif %}</div>
+        {% if current_programme %}
+        <div class="watch-programme current">📺 {{ current_programme }}</div>
+        {% endif %}
+        {% if next_programme %}
+        <div class="watch-programme next">↪ Next: {{ next_programme }}</div>
+        {% endif %}
+        {% if not current_programme and not next_programme %}
+        <div class="watch-programme none">No EPG data for this channel.</div>
+        {% endif %}
+      </div>
+    </div>
+  </header>
+  <video id="player" controls autoplay playsinline></video>
+</div>
+<script>
+  (() => {
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const v = document.getElementById('player');
+    v.src = isIOS ? {{ hls_url|tojson }} : {{ mp4_url|tojson }};
+  })();
+</script>
+{% endblock %}

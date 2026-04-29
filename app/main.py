@@ -252,13 +252,9 @@ def create_app() -> Flask:
         return f"{lan_base_url}/{_enc(channel.id)}/stream.ts"
 
     def _channel_dto(c):
-        base = _public_base()
-        cid_enc = _enc(c.id)
         return {
             "id": c.id, "name": c.name, "group": c.group,
             "logo": c.logo, "source": c.source, "url": c.url,
-            "watch_mp4_url": f"{base}/{cid_enc}/stream.mp4",
-            "watch_hls_url": f"{base}/{cid_enc}/stream.m3u8",
             "current_programme": (
                 epg.format_current(tvg_id=c.tvg_id, channel_name=c.name) if epg else None
             ),
@@ -379,6 +375,27 @@ def create_app() -> Flask:
             lines.append(f"{base}/{_enc(c.id)}/stream.ts")
         body = "\n".join(lines) + "\n"
         return Response(body, content_type="audio/x-mpegurl; charset=utf-8")
+
+    @app.get("/<cid>/watch")
+    def watch_route(cid: str):
+        channel = state.channel_by_id(cid)
+        if channel is None:
+            return Response("unknown channel\n", status=404,
+                            content_type="text/plain; charset=utf-8")
+        base = _public_base()
+        cid_enc = _enc(channel.id)
+        current = (epg.format_current(tvg_id=channel.tvg_id, channel_name=channel.name)
+                   if epg else None)
+        nxt = (epg.format_next(tvg_id=channel.tvg_id, channel_name=channel.name)
+               if epg else None)
+        return render_template(
+            "watch.html",
+            channel=channel,
+            current_programme=current,
+            next_programme=nxt,
+            mp4_url=f"{base}/{cid_enc}/stream.mp4",
+            hls_url=f"{base}/{cid_enc}/stream.m3u8",
+        )
 
     @app.get("/epg.xml")
     def epg_route():

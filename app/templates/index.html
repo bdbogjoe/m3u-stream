@@ -54,8 +54,7 @@
          data-name="{{ c.name|lower }}"
          data-group="{{ c.group }}"
          data-source="{{ c.source }}"
-         data-watch-mp4="{{ c.watch_mp4_url }}"
-         data-watch-hls="{{ c.watch_hls_url }}"
+         data-watch-url="/{{ c.id|urlencode }}/watch"
          tabindex="0">
       <div class="logo">
         {% if c.logo %}<img loading="lazy" src="{{ url_for('logo_route', url=c.logo) }}" alt=""
