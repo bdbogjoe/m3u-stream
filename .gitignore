@@ -6,3 +6,7 @@ venv/
 .idea/
 .vscode/
 .claude/
+
+# Local diagnostic dumps
+epg.xml
+*.m3u
