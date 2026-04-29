@@ -15,6 +15,13 @@ HLS_IDLE_TIMEOUT = 30.0   # stop ffmpeg(hls) after this many seconds without a r
 HLS_INITIAL_WAIT = 10.0   # wait this long for the first playlist to appear
 
 
+def _is_ios_ua(ua: str) -> bool:
+    """Match iOS Safari / iOS Chrome (all iOS browsers use WebKit). iPadOS
+    13+ on iPad sometimes masquerades as desktop Safari and is undetectable
+    from UA alone — that case is handled by the index page's JS instead."""
+    return any(x in ua for x in ("iPhone", "iPad", "iPod", "CPU OS", "iPhone OS"))
+
+
 def _ffmpeg_cmd(source_url: str, output: str) -> list[str]:
     base = [
         "ffmpeg", "-loglevel", "warning", "-nostdin",
@@ -132,6 +139,15 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._serve_hls(path, relay)
             return
         if path.endswith(".mp4"):
+            # iOS WebKit can't play live fragmented MP4 — redirect to HLS,
+            # which iOS plays natively.
+            if _is_ios_ua(self.headers.get("User-Agent", "")):
+                self.send_response(302)
+                self.send_header("Location", "/hls/stream.m3u8")
+                self.send_header("Cache-Control", "no-store")
+                self._send_cors_headers()
+                self.end_headers()
+                return
             self._serve_ffmpeg_pipe(relay.source, "mp4", "video/mp4")
             return
         self._serve_ffmpeg_pipe(relay.source, "mpegts", "video/mpeg")
