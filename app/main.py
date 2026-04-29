@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import ipaddress
 import logging
 import os
@@ -59,13 +60,17 @@ def _parse_sources(raw: str) -> list[tuple[str, str]]:
     return out
 
 
+def _channel_hash_id(source: str, natural: str) -> str:
+    return hashlib.sha1(f"{source}:{natural}".encode("utf-8")).hexdigest()[:10]
+
+
 def _load_all(sources: list[tuple[str, str]]) -> list[m3u.Channel]:
     all_channels: list[m3u.Channel] = []
     for name, url in sources:
         channels = m3u.fetch(url)
         for c in channels:
             c.source = name
-            c.id = f"{name}:{c.id}"
+            c.id = _channel_hash_id(name, c.id)
         log.info("loaded %d channels from %s (%s)", len(channels), name, url)
         all_channels.extend(channels)
     return all_channels
