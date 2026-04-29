@@ -89,3 +89,4 @@ main { padding: 1rem 1.5rem; }
 .tile .logo img { max-width: 100%; max-height: 100%; }
 .tile .name { font-weight: 600; }
 .tile .group { color: #888; font-size: 0.8rem; }
+.tile .programme { color: #6ce; font-size: 0.75rem; margin-top: 0.15rem; }

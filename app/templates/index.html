@@ -64,6 +64,7 @@
       <div class="meta">
         <div class="name">{{ c.name }}</div>
         <div class="group">{{ c.group }}</div>
+        {% if c.current_programme %}<div class="programme">{{ c.current_programme }}</div>{% endif %}
       </div>
       <button class="watch-btn" type="button" title="Watch in browser">▶</button>
     </div>

@@ -46,6 +46,7 @@ class Channel:
     group: str = ""
     logo: str = ""
     source: str = ""
+    tvg_id: str = ""
 
 
 def parse(text: str) -> list[Channel]:
@@ -65,10 +66,12 @@ def parse(text: str) -> list[Channel]:
                 j += 1
             if j < len(lines):
                 url = lines[j].strip()
-                base = attrs.get("tvg-id") or name or url
+                tvg_id = attrs.get("tvg-id", "")
+                base = tvg_id or name or url
                 seen_ids[base] = seen_ids.get(base, 0) + 1
                 cid = base if seen_ids[base] == 1 else f"{base}#{seen_ids[base]}"
-                channels.append(Channel(id=cid, name=name, url=url, group=group, logo=logo))
+                channels.append(Channel(id=cid, name=name, url=url, group=group,
+                                        logo=logo, tvg_id=tvg_id))
                 i = j
         i += 1
     return channels

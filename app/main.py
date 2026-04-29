@@ -21,6 +21,7 @@ import urllib3
 from flask import Flask, Response, jsonify, render_template, request
 
 from . import dlna, m3u
+from .epg import EPG
 from .state import AppState
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -138,6 +139,11 @@ def create_app() -> Flask:
         log.error("failed to fetch M3U at startup: %s", e)
         sys.exit(2)
 
+    epg_url = (os.environ.get("EPG_URL") or "").strip()
+    epg: EPG | None = EPG(epg_url) if epg_url else None
+    if epg:
+        log.info("EPG_URL       = %s", epg_url)
+
     app = Flask(__name__)
     app.config["state"] = state
     app.config["sources"] = sources
@@ -248,6 +254,7 @@ def create_app() -> Flask:
             "logo": c.logo, "source": c.source, "url": c.url,
             "watch_mp4_url": f"{base}/{cid_enc}/stream.mp4",
             "watch_hls_url": f"{base}/{cid_enc}/stream.m3u8",
+            "current_programme": epg.format_current(c.tvg_id) if epg else None,
         }
 
     def _status_dto():
