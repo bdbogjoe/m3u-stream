@@ -1,4 +1,5 @@
 import base64
+import ipaddress
 import logging
 import os
 import posixpath
@@ -90,8 +91,20 @@ def create_app() -> Flask:
     auth_user = os.environ.get("AUTH_USER", "")
     auth_pass = os.environ.get("AUTH_PASS", "")
     auth_enabled = bool(auth_user and auth_pass)
+    default_cidrs = "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,::1/128,fc00::/7"
+    cidrs_str = os.environ.get("AUTH_TRUSTED_CIDRS", default_cidrs)
+    trusted_nets = []
+    for c in cidrs_str.split(","):
+        c = c.strip()
+        if not c:
+            continue
+        try:
+            trusted_nets.append(ipaddress.ip_network(c, strict=False))
+        except ValueError as e:
+            log.warning("ignoring invalid CIDR %s: %s", c, e)
     if auth_enabled:
         log.info("basic auth   = enabled (proxied requests only)")
+        log.info("auth bypass  = %s", ",".join(str(n) for n in trusted_nets))
     log.info("host_ip       = %s", host_ip)
     log.info("tv_ip         = %s  (cast %s)",
              tv_ip or "-", "enabled" if tv_ip else "disabled")
@@ -108,7 +121,8 @@ def create_app() -> Flask:
         sys.exit(2)
 
     state = AppState(relay_port, web_url=web_lan_url, web_public_url=web_public_url,
-                     auth_user=auth_user, auth_pass=auth_pass)
+                     auth_user=auth_user, auth_pass=auth_pass,
+                     auth_trusted_nets=trusted_nets)
     try:
         state.channels = _load_all(sources)
         log.info("loaded %d channels total from %d source(s)",
@@ -133,6 +147,13 @@ def create_app() -> Flask:
         u, _, p = decoded.partition(":")
         return secrets.compare_digest(u, auth_user) and secrets.compare_digest(p, auth_pass)
 
+    def _client_ip_trusted(client_ip: str) -> bool:
+        try:
+            ip = ipaddress.ip_address(client_ip)
+        except ValueError:
+            return False
+        return any(ip in net for net in trusted_nets)
+
     @app.before_request
     def _require_auth_when_proxied():
         if not auth_enabled:
@@ -143,6 +164,11 @@ def create_app() -> Flask:
                       ("X-Forwarded-Host", "X-Forwarded-Proto",
                        "X-Forwarded-For", "Forwarded"))
         if not proxied:
+            return None
+        # Skip auth for clients on the LAN even when reached via the proxy.
+        xff = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        client_ip = xff or (request.remote_addr or "")
+        if client_ip and _client_ip_trusted(client_ip):
             return None
         if _check_basic_auth(request.headers.get("Authorization")):
             return None

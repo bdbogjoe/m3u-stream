@@ -60,6 +60,7 @@ In bridge mode you **must** set `HOST_IP` explicitly to the host's LAN IP — th
 | `RELAY_BASE_URL` | no   | —                | Public base URL for the relay (e.g. `https://stream.example.com`). Used only when the request reaches the app through a reverse proxy (any `X-Forwarded-*` header present). DLNA cast always uses `http://$HOST_IP:$RELAY_PORT`. |
 | `WEB_BASE_URL`   | no   | —                | Public base URL for the web UI (e.g. `https://m3u.example.com`). Used in the relay's "no stream running" 503 page so the link points at the public UI when reached via the proxy. |
 | `AUTH_USER`, `AUTH_PASS` | no | —          | When both are set, HTTP basic auth is required for proxied requests only. LAN-direct requests stay open so DLNA cast / mpv / VLC keep working without credentials. |
+| `AUTH_TRUSTED_CIDRS` | no | RFC1918 + loopback | Comma-separated CIDRs whose clients bypass auth even when reaching the app through the proxy (read from `X-Forwarded-For`). Default trusts any LAN / private IPv4 + IPv6. |
 | `IMAGE`      | no       | `m3u-stream:local` | Image reference used by `docker-compose.yml`.                            |
 
 ### Multi-source M3U examples

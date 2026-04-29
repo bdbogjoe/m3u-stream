@@ -13,4 +13,5 @@ services:
       WEB_BASE_URL: ${WEB_BASE_URL:-}
       AUTH_USER: ${AUTH_USER:-}
       AUTH_PASS: ${AUTH_PASS:-}
+      AUTH_TRUSTED_CIDRS: ${AUTH_TRUSTED_CIDRS:-}
     restart: unless-stopped

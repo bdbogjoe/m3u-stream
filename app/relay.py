@@ -1,5 +1,6 @@
 import base64
 import http.server
+import ipaddress
 import logging
 import secrets
 import shutil
@@ -123,6 +124,15 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _auth_ok(self, relay: "Relay") -> bool:
         if not relay.auth_enabled or not self._is_proxied():
             return True
+        # LAN clients reaching us via the proxy still skip auth.
+        xff = (self.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        if xff:
+            try:
+                ip = ipaddress.ip_address(xff)
+            except ValueError:
+                ip = None
+            if ip is not None and any(ip in net for net in relay.auth_trusted_nets):
+                return True
         header = self.headers.get("Authorization", "")
         if not header.startswith("Basic "):
             return False
@@ -305,13 +315,14 @@ class Relay:
     """
 
     def __init__(self, port: int, web_url: str = "", web_public_url: str = "",
-                 auth_user: str = "", auth_pass: str = ""):
+                 auth_user: str = "", auth_pass: str = "", auth_trusted_nets=None):
         self.port = port
         self.web_url = web_url or "the m3u-stream web UI"
         self.web_public_url = web_public_url
         self.auth_user = auth_user
         self.auth_pass = auth_pass
         self.auth_enabled = bool(auth_user and auth_pass)
+        self.auth_trusted_nets = list(auth_trusted_nets or [])
         self._source: str | None = None
         self._hls_dir = Path(tempfile.mkdtemp(prefix="m3u-stream-hls-"))
         self._hls_proc: subprocess.Popen | None = None
