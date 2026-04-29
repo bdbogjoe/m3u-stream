@@ -254,7 +254,9 @@ def create_app() -> Flask:
             "logo": c.logo, "source": c.source, "url": c.url,
             "watch_mp4_url": f"{base}/{cid_enc}/stream.mp4",
             "watch_hls_url": f"{base}/{cid_enc}/stream.m3u8",
-            "current_programme": epg.format_current(c.tvg_id) if epg else None,
+            "current_programme": (
+                epg.format_current(tvg_id=c.tvg_id, channel_name=c.name) if epg else None
+            ),
         }
 
     def _status_dto():

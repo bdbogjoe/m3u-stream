@@ -1,6 +1,7 @@
 import gzip
 import io
 import logging
+import re
 import threading
 import time
 import urllib.request
@@ -9,6 +10,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 log = logging.getLogger("m3u-stream.epg")
+
+_NORM_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _norm(name: str) -> str:
+    return _NORM_RE.sub("", name.lower())
 
 
 @dataclass(frozen=True)
@@ -37,6 +44,7 @@ class EPG:
         self.url = url
         self.ttl = ttl_seconds
         self._programmes: dict[str, list[Programme]] = {}
+        self._name_to_id: dict[str, str] = {}
         self._lock = threading.Lock()
         self._loaded = threading.Event()
         threading.Thread(target=self._refresher, daemon=True).start()
@@ -61,6 +69,7 @@ class EPG:
         if data[:2] == b"\x1f\x8b":
             data = gzip.decompress(data)
         progs: dict[str, list[Programme]] = {}
+        names: dict[str, str] = {}
         now = datetime.now(timezone.utc)
         for _, elem in ET.iterparse(io.BytesIO(data), events=("end",)):
             if elem.tag == "programme":
@@ -75,26 +84,50 @@ class EPG:
                         progs.setdefault(cid, []).append(Programme(start, stop, title))
                 elem.clear()
             elif elem.tag == "channel":
+                cid = elem.get("id", "")
+                if cid:
+                    for d in elem.findall("display-name"):
+                        text = (d.text or "").strip()
+                        if not text:
+                            continue
+                        key = _norm(text)
+                        # First channel wins on collision; XMLTV typically
+                        # lists more "canonical" names earlier in the file.
+                        names.setdefault(key, cid)
+                    # Also map the id itself in case the M3U name matches it.
+                    names.setdefault(_norm(cid), cid)
                 elem.clear()
         for plist in progs.values():
             plist.sort(key=lambda p: p.start)
         with self._lock:
             self._programmes = progs
-        log.info("EPG loaded: %d channels", len(progs))
+            self._name_to_id = names
+        log.info("EPG loaded: %d channels with programmes, %d display-names",
+                 len(progs), len(names))
 
-    def current(self, tvg_id: str) -> Programme | None:
-        if not tvg_id:
-            return None
+    def _current_for_id(self, cid: str) -> Programme | None:
         now = datetime.now(timezone.utc)
         with self._lock:
-            progs = self._programmes.get(tvg_id, [])
+            progs = self._programmes.get(cid, [])
         for p in progs:
             if p.start <= now < p.stop:
                 return p
         return None
 
-    def format_current(self, tvg_id: str) -> str | None:
-        p = self.current(tvg_id)
+    def current(self, tvg_id: str = "", channel_name: str = "") -> Programme | None:
+        if tvg_id:
+            p = self._current_for_id(tvg_id)
+            if p is not None:
+                return p
+        if channel_name:
+            with self._lock:
+                cid = self._name_to_id.get(_norm(channel_name))
+            if cid:
+                return self._current_for_id(cid)
+        return None
+
+    def format_current(self, tvg_id: str = "", channel_name: str = "") -> str | None:
+        p = self.current(tvg_id=tvg_id, channel_name=channel_name)
         if p is None:
             return None
         return f"{p.title} · until {p.stop.astimezone().strftime('%H:%M')}"
