@@ -24,7 +24,7 @@
       </div>
     </div>
   </header>
-  <video id="player" controls autoplay playsinline></video>
+  <video id="player" controls autoplay muted playsinline></video>
 </div>
 <script>
   (() => {
@@ -32,6 +32,11 @@
                   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     const v = document.getElementById('player');
     v.src = isIOS ? {{ hls_url|tojson }} : {{ mp4_url|tojson }};
+    // Try to unmute as soon as the user interacts with the page — until then
+    // autoplay policies require muted playback.
+    const unmute = () => { v.muted = false; document.removeEventListener('click', unmute); };
+    document.addEventListener('click', unmute, { once: true });
+    v.play().catch(() => { /* autoplay refused; user must press play */ });
   })();
 </script>
 {% endblock %}
