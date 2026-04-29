@@ -6,10 +6,10 @@ from .relay import Relay
 
 
 class AppState:
-    def __init__(self, relay_port: int, web_url: str = ""):
+    def __init__(self, relay_port: int, web_url: str = "", web_public_url: str = ""):
         self.lock = threading.Lock()
         self.channels: list[Channel] = []
-        self.relay = Relay(relay_port, web_url=web_url)
+        self.relay = Relay(relay_port, web_url=web_url, web_public_url=web_public_url)
         self.current: Optional[Channel] = None
         self.control_url: Optional[str] = None
         self.casting: bool = False

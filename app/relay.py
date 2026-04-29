@@ -70,7 +70,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _send_no_stream(self) -> None:
         relay: Relay = self.server.relay  # type: ignore[attr-defined]
-        web_url = relay.web_url
+        proxied = any(self.headers.get(h) for h in
+                      ("X-Forwarded-Host", "X-Forwarded-Proto",
+                       "X-Forwarded-For", "Forwarded"))
+        web_url = relay.web_public_url if proxied and relay.web_public_url else relay.web_url
         wants_html = "text/html" in self.headers.get("Accept", "")
         if wants_html:
             from html import escape
@@ -245,9 +248,10 @@ class Relay:
       /hls/segNNNNN.ts       HLS segments
     """
 
-    def __init__(self, port: int, web_url: str = ""):
+    def __init__(self, port: int, web_url: str = "", web_public_url: str = ""):
         self.port = port
         self.web_url = web_url or "the m3u-stream web UI"
+        self.web_public_url = web_public_url
         self._source: str | None = None
         self._hls_dir = Path(tempfile.mkdtemp(prefix="m3u-stream-hls-"))
         self._hls_proc: subprocess.Popen | None = None

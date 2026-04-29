@@ -83,12 +83,14 @@ def create_app() -> Flask:
     host_ip = os.environ.get("HOST_IP") or _detect_host_ip(tv_ip or "1.1.1.1")
     lan_base_url = f"http://{host_ip}:{relay_port}"
     relay_base_url_env = (os.environ.get("RELAY_BASE_URL") or "").rstrip("/")
-    web_base_url = (os.environ.get("WEB_BASE_URL") or
-                    f"http://{host_ip}:{web_port}").rstrip("/")
+    web_lan_url = f"http://{host_ip}:{web_port}"
+    web_public_url = (os.environ.get("WEB_BASE_URL") or "").rstrip("/")
     log.info("host_ip       = %s", host_ip)
     log.info("tv_ip         = %s  (cast %s)",
              tv_ip or "-", "enabled" if tv_ip else "disabled")
-    log.info("web UI        = %s", web_base_url)
+    log.info("web UI (LAN)  = %s", web_lan_url)
+    if web_public_url:
+        log.info("web UI (public)= %s", web_public_url)
     log.info("relay (LAN)   = %s/stream.ts   /stream.mp4   /hls/stream.m3u8", lan_base_url)
     if relay_base_url_env:
         log.info("relay (public)= %s/stream.ts   /stream.mp4   /hls/stream.m3u8", relay_base_url_env)
@@ -98,7 +100,7 @@ def create_app() -> Flask:
         log.error("M3U_URL did not yield any URL")
         sys.exit(2)
 
-    state = AppState(relay_port, web_url=web_base_url)
+    state = AppState(relay_port, web_url=web_lan_url, web_public_url=web_public_url)
     try:
         state.channels = _load_all(sources)
         log.info("loaded %d channels total from %d source(s)",
