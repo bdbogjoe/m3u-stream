@@ -63,7 +63,7 @@
          data-url="{{ c.url }}"
          tabindex="0">
       <div class="logo">
-        {% if c.logo %}<img loading="lazy" src="{{ c.logo }}" alt="">{% endif %}
+        {% if c.logo %}<img loading="lazy" src="{{ url_for('logo_route', url=c.logo) }}" alt="">{% endif %}
       </div>
       <div class="meta">
         <div class="name">{{ c.name }}</div>

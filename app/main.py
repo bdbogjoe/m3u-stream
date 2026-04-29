@@ -10,10 +10,14 @@ if __name__ == "__main__" and __package__ in (None, ""):
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
     __package__ = "app"
 
-from flask import Flask, jsonify, render_template, request
+import requests
+import urllib3
+from flask import Flask, Response, jsonify, render_template, request
 
 from . import dlna, m3u
 from .state import AppState
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("m3u-stream")
@@ -138,6 +142,23 @@ def create_app() -> Flask:
             _stop_everything()
         state.relay.start(channel.url)
         state.current = channel
+
+    @app.get("/logo")
+    def logo_route():
+        url = request.args.get("url", "").strip()
+        if not url or not url.startswith(("http://", "https://")):
+            return ("", 400)
+        try:
+            r = requests.get(url, timeout=5, verify=False, stream=True,
+                             headers={"User-Agent": "m3u-stream/1.0"})
+        except Exception:
+            return ("", 502)
+        if r.status_code != 200:
+            return ("", 404)
+        ct = r.headers.get("Content-Type", "image/png")
+        resp = Response(r.iter_content(8192), content_type=ct)
+        resp.headers["Cache-Control"] = "public, max-age=86400"
+        return resp
 
     @app.get("/")
     def index():
