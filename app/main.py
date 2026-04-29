@@ -1,3 +1,4 @@
+import atexit
 import base64
 import hashlib
 import ipaddress
@@ -5,6 +6,7 @@ import logging
 import os
 import posixpath
 import secrets
+import signal
 import subprocess
 import sys
 from urllib.parse import urlparse
@@ -141,6 +143,35 @@ def create_app() -> Flask:
     app.config["sources"] = sources
     app.config["tv_ip"] = tv_ip
     app.config["host_ip"] = host_ip
+
+    def _shutdown_cleanup():
+        # Tell the TV to stop pulling our relay URL — otherwise webOS keeps
+        # trying long after the process is gone.
+        if state.casting and state.control_url:
+            try:
+                dlna.stop(state.control_url)
+                log.info("shutdown: sent Stop to TV")
+            except Exception as e:
+                log.warning("shutdown: dlna stop failed: %s", e)
+        try:
+            state.relay.shutdown()
+        except Exception:
+            pass
+
+    atexit.register(_shutdown_cleanup)
+    # SIGTERM (Docker stop, IDE stop) doesn't trigger atexit on its own.
+    def _on_term(signum, _frame):
+        _shutdown_cleanup()
+        # Re-raise default behaviour so the process actually exits.
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(sig, _on_term)
+        except (ValueError, OSError):
+            # Werkzeug's reloader runs the app in a child thread where
+            # signal handlers can't be installed; not fatal.
+            pass
 
     def _check_basic_auth(header: str | None) -> bool:
         if not header or not header.startswith("Basic "):
