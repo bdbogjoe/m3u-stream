@@ -2,6 +2,7 @@ import threading
 from typing import Optional
 
 from .m3u import Channel
+from .probe import Prober
 from .relay import Relay
 
 
@@ -13,6 +14,7 @@ class AppState:
         self.current: Optional[Channel] = None
         self.control_url: Optional[str] = None
         self.casting: bool = False
+        self.prober = Prober()
 
         # Relay resolves channel ids to URLs by asking us back.
         self.relay = Relay(

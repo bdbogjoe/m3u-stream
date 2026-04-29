@@ -144,6 +144,8 @@ def create_app() -> Flask:
     if epg:
         log.info("EPG_URL       = %s", epg_url)
 
+    state.prober.start(state.channels)
+
     app = Flask(__name__)
     app.config["state"] = state
     app.config["sources"] = sources
@@ -251,13 +253,15 @@ def create_app() -> Flask:
         # LAN-direct: the TV won't resolve an external/proxied hostname.
         return f"{lan_base_url}/{_enc(channel.id)}/stream.ts"
 
-    def _channel_dto(c):
+    def _channel_dto(c, probe: dict[str, bool] | None = None):
         return {
             "id": c.id, "name": c.name, "group": c.group,
             "logo": c.logo, "source": c.source, "url": c.url,
             "current_programme": (
                 epg.format_current(tvg_id=c.tvg_id, channel_name=c.name) if epg else None
             ),
+            # True / False / None (not yet probed)
+            "online": (probe.get(c.id) if probe is not None else None),
         }
 
     def _status_dto():
@@ -319,7 +323,8 @@ def create_app() -> Flask:
         )
         # Pre-build watch URLs server-side so the template can render them
         # directly without computing per-channel URLs in Jinja.
-        channels = [_channel_dto(c) for c in channels_sorted]
+        probe = state.prober.status()
+        channels = [_channel_dto(c, probe) for c in channels_sorted]
         groups = sorted(m3u.groups(state.channels), key=str.lower)
         srcs = sorted(m3u.sources(state.channels), key=str.lower)
         return render_template(
@@ -472,7 +477,14 @@ def create_app() -> Flask:
             return jsonify(ok=False, error=str(e)), 502
         with state.lock:
             state.channels = channels
+        state.prober.start(channels)
         return jsonify(ok=True, count=len(channels))
+
+    @app.post("/probe")
+    def probe_route():
+        if state.prober.start(state.channels):
+            return jsonify(ok=True, started=True, channels=len(state.channels))
+        return jsonify(ok=True, started=False, reason="probe already running")
 
     return app
 

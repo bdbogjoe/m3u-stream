@@ -59,6 +59,9 @@
       <div class="logo">
         {% if c.logo %}<img loading="lazy" src="{{ url_for('logo_route', url=c.logo) }}" alt=""
                             onerror="this.style.display='none'">{% endif %}
+        {% if c.online is sameas true %}<span class="status-dot online" title="online"></span>
+        {% elif c.online is sameas false %}<span class="status-dot offline" title="offline"></span>
+        {% endif %}
       </div>
       <div class="meta">
         <div class="name">
