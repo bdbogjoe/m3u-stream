@@ -12,20 +12,23 @@ log = logging.getLogger("m3u-stream.probe")
 def probe_url(url: str, timeout: float = 4.0) -> bool:
     """HEAD-based reachability check for a stream URL.
 
-    Returns True for any 2xx/3xx status code that the player would
-    interpret as "the stream is there". Falls back to a tiny ranged GET
-    if the upstream rejects HEAD (405). Network-level errors → False.
+    Treats any 2xx or 3xx response from the *first* hop as "online" —
+    IPTV providers commonly 302 to a token-bound CDN endpoint that
+    only their player follows correctly, so following the redirect
+    chain ourselves leads into hangs and false-offline reports.
+    Network-level errors → False. On 405 (HEAD not allowed) we fall
+    back to a tiny ranged GET, also without redirect following.
     """
     headers = {"Accept-Encoding": "identity"}
     try:
-        r = requests.head(url, timeout=timeout, allow_redirects=True, headers=headers)
-        if r.status_code in (200, 206) or 300 <= r.status_code < 400:
+        r = requests.head(url, timeout=timeout, allow_redirects=False, headers=headers)
+        if 200 <= r.status_code < 400:
             return True
         if r.status_code == 405:
-            r = requests.get(url, timeout=timeout, stream=True, allow_redirects=True,
+            r = requests.get(url, timeout=timeout, stream=True, allow_redirects=False,
                              headers={**headers, "Range": "bytes=0-1023"})
             try:
-                return r.status_code in (200, 206)
+                return 200 <= r.status_code < 400
             finally:
                 r.close()
         return False
