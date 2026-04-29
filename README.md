@@ -95,7 +95,7 @@ You'll need `ffmpeg` and `iproute2` available on the host.
 | POST   | `/reload`           | Re-fetch all configured M3U URLs.                      |
 | POST   | `/probe`            | Re-check reachability of every channel's upstream URL. |
 | GET    | `/healthz`          | Liveness probe.                                        |
-| GET    | `/all.m3u`          | M3U playlist of all channels, with our relay's stream URLs. When `EPG_URL` is set, includes `x-tvg-url="…/epg.xml"` and rewrites each `tvg-id` to match the XMLTV's channel id (looked up by name) so external players can pair the playlist with `/epg.xml`. |
+| GET    | `/all.m3u`          | M3U playlist of all channels, with our relay's stream URLs. Channels confirmed offline by the probe are excluded; online + not-yet-probed channels are included. When `EPG_URL` is set, includes `x-tvg-url="…/epg.xml"` and rewrites each `tvg-id` to match the XMLTV's channel id (looked up by name) so external players can pair the playlist with `/epg.xml`. |
 | GET    | `/<source>.m3u`     | Same, restricted to one source (e.g. `/france.m3u`).   |
 | GET    | `/<src1>-<src2>.m3u`| Same, restricted to a dash-joined set (e.g. `/france-sport.m3u`). |
 | GET    | `/epg.xml`          | Cached XMLTV (uncompressed). 404 when `EPG_URL` is unset, 503 while the first fetch is still in flight. |

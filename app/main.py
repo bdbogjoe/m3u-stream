@@ -366,6 +366,11 @@ def create_app() -> Flask:
         )
         if wanted is not None:
             chans = [c for c in chans if c.source in wanted]
+        # Keep online + not-yet-probed (None); drop only the ones we've
+        # definitively confirmed offline so external players don't waste
+        # time on dead URLs.
+        probe = state.prober.status()
+        chans = [c for c in chans if probe.get(c.id) is not False]
         base = _public_base()
         q = lambda v: v.replace('"', "'")
         header = "#EXTM3U"
