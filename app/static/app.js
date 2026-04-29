@@ -29,6 +29,7 @@
   };
 
   const setSelected = (tile) => {
+    if (!selectedName) return; // cast disabled — selection is meaningless
     if (selectedTile) selectedTile.classList.remove('selected');
     selectedTile = tile;
     if (tile) {

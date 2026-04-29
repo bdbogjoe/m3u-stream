@@ -24,18 +24,18 @@
     <span id="status"></span>
   </div>
 
+  {% if status.cast_enabled %}
   <div id="action-bar">
     <div class="selection">
       <span class="label">Selected:</span>
       <strong id="selected-name">— none —</strong>
     </div>
     <div class="buttons">
-      {% if status.cast_enabled %}
       <button id="cast-btn" type="button" disabled>Cast to TV</button>
       <button id="stop-btn" type="button" disabled>Stop cast</button>
-      {% endif %}
     </div>
   </div>
+  {% endif %}
 
   <div id="now-playing"
        data-current-id="{{ status.current.id if status.current else '' }}"
