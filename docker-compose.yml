@@ -1,7 +1,7 @@
 services:
   m3u-stream:
     build: .
-    image: m3u-stream:latest
+    image: ${IMAGE:-m3u-stream:local}
     network_mode: host
     environment:
       M3U_URL: ${M3U_URL}

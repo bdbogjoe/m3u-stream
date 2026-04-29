@@ -16,18 +16,23 @@ class DLNAError(RuntimeError):
 
 
 def discover_control_url(tv_ip: str, timeout: float = 3.0) -> str:
-    """SSDP M-SEARCH for AVTransport, filtered to tv_ip. Returns the absolute control URL."""
+    """SSDP M-SEARCH for AVTransport, sent unicast to tv_ip:1900.
+
+    Unicast (instead of the usual 239.255.255.250 multicast) so this works
+    in both Docker host networking and bridge networking — multicast is not
+    forwarded across the bridge by default, but unicast UDP is NAT'd just
+    like any other outbound packet.
+    """
     msg = (
         "M-SEARCH * HTTP/1.1\r\n"
-        "HOST: 239.255.255.250:1900\r\n"
+        f"HOST: {tv_ip}:1900\r\n"
         'MAN: "ssdp:discover"\r\n'
-        "MX: 2\r\n"
+        "MX: 1\r\n"
         f"ST: {AVTRANSPORT}\r\n\r\n"
     ).encode()
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
     s.settimeout(timeout)
-    s.sendto(msg, ("239.255.255.250", 1900))
+    s.sendto(msg, (tv_ip, 1900))
     try:
         while True:
             data, addr = s.recvfrom(4096)

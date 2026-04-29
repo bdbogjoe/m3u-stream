@@ -1,0 +1,12 @@
+# Bridge-mode override. Use with the default compose file:
+#   docker compose -f docker-compose.yml -f docker-compose.bridge.yml up
+#
+# Bridge mode requires HOST_IP to be set explicitly to the host's LAN IP,
+# because the auto-detected source IP from inside the container is the
+# Docker bridge address (e.g. 172.17.0.x) which the TV cannot reach.
+services:
+  m3u-stream:
+    network_mode: bridge
+    ports:
+      - "${WEB_PORT:-8080}:${WEB_PORT:-8080}"
+      - "${RELAY_PORT:-8888}:${RELAY_PORT:-8888}"
