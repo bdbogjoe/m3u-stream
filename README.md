@@ -57,6 +57,7 @@ In bridge mode you **must** set `HOST_IP` explicitly to the host's LAN IP — th
 | `WEB_PORT`   | no       | `8080`           | Web UI port.                                                             |
 | `RELAY_PORT` | no       | `8888`           | HTTP relay port (`/stream.ts`, `/stream.mp4`).                           |
 | `HOST_IP`    | no       | auto             | Auto-detected via `ip route get $TV_IP` (or `1.1.1.1` if no TV). Required in bridge mode. |
+| `RELAY_BASE_URL` | no   | `http://$HOST_IP:$RELAY_PORT` | Override the base URL the TV / browser uses to reach the relay. Set this when the relay is behind a reverse proxy / TLS terminator (e.g. `https://stream.example.com`). |
 | `IMAGE`      | no       | `m3u-stream:local` | Image reference used by `docker-compose.yml`.                            |
 
 ### Multi-source M3U examples

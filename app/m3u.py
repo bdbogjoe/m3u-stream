@@ -6,6 +6,19 @@ import requests
 
 
 _EXTINF_ATTR = re.compile(r'([\w-]+)="([^"]*)"')
+_SCHEME = re.compile(r'https?://')
+
+
+def _clean_url(url: str) -> str:
+    """Some M3U feeds concatenate a base URL without a separating slash,
+    producing values like `http://host:portHTTPS://real/logo.png`.
+    Detect a second scheme and keep the trailing real URL."""
+    if not url:
+        return url
+    matches = list(_SCHEME.finditer(url))
+    if len(matches) > 1:
+        return url[matches[-1].start():]
+    return url
 
 
 @dataclass
@@ -29,7 +42,7 @@ def parse(text: str) -> list[Channel]:
             attrs = dict(_EXTINF_ATTR.findall(line))
             name = line.split(",", 1)[1].strip() if "," in line else attrs.get("tvg-name", "")
             group = attrs.get("group-title", "")
-            logo = attrs.get("tvg-logo", "")
+            logo = _clean_url(attrs.get("tvg-logo", ""))
             j = i + 1
             while j < len(lines) and (not lines[j].strip() or lines[j].startswith("#")):
                 j += 1

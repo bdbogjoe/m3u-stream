@@ -9,4 +9,5 @@ services:
       WEB_PORT: ${WEB_PORT:-8080}
       RELAY_PORT: ${RELAY_PORT:-8888}
       HOST_IP: ${HOST_IP:-}
+      RELAY_BASE_URL: ${RELAY_BASE_URL:-}
     restart: unless-stopped

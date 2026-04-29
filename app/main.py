@@ -79,8 +79,10 @@ def create_app() -> Flask:
 
     relay_port = int(os.environ.get("RELAY_PORT", "8888"))
     host_ip = os.environ.get("HOST_IP") or _detect_host_ip(tv_ip or "1.1.1.1")
-    log.info("host_ip=%s tv_ip=%s relay_port=%d",
-             host_ip, tv_ip or "(disabled)", relay_port)
+    relay_base_url = (os.environ.get("RELAY_BASE_URL") or
+                      f"http://{host_ip}:{relay_port}").rstrip("/")
+    log.info("host_ip=%s tv_ip=%s relay_port=%d relay_base_url=%s",
+             host_ip, tv_ip or "(disabled)", relay_port, relay_base_url)
 
     sources = _parse_sources(m3u_url)
     if not sources:
@@ -110,8 +112,8 @@ def create_app() -> Flask:
             log.info("AVTransport control URL: %s", state.control_url)
         return state.control_url
 
-    relay_stream_url = f"http://{host_ip}:{relay_port}/stream.ts"
-    relay_mp4_url = f"http://{host_ip}:{relay_port}/stream.mp4"
+    relay_stream_url = f"{relay_base_url}/stream.ts"
+    relay_mp4_url = f"{relay_base_url}/stream.mp4"
 
     def _channel_dto(c):
         return {"id": c.id, "name": c.name, "group": c.group,
