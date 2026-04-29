@@ -23,20 +23,16 @@ def _ffmpeg_cmd(source_url: str, output: str) -> list[str]:
         "-i", source_url,
     ]
     if output == "mp4":
-        # Fragmented MP4 for direct browser playback. Video copied (assumes H.264);
-        # audio re-encoded to AAC so MP2/AC3 sources still work in Chrome.
         return base + [
             "-c:v", "copy",
             "-c:a", "aac", "-b:a", "128k", "-ac", "2",
             "-movflags", "frag_keyframe+empty_moov+default_base_moof",
             "-f", "mp4", "pipe:1",
         ]
-    # Default: MPEG-TS (TV cast / mpv)
     return base + ["-c", "copy", "-f", "mpegts", "pipe:1"]
 
 
 def _ffmpeg_hls_cmd(source_url: str, hls_dir: Path) -> list[str]:
-    # Rolling HLS playlist for iOS / Safari, which can't play live fMP4.
     return [
         "ffmpeg", "-loglevel", "warning", "-nostdin",
         "-user_agent", "Mozilla/5.0 (compatible; m3u-stream/1.0)",
@@ -72,6 +68,41 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return "video/mp2t"
         return "video/mpeg"
 
+    def _send_no_stream(self) -> None:
+        relay: Relay = self.server.relay  # type: ignore[attr-defined]
+        web_url = relay.web_url
+        wants_html = "text/html" in self.headers.get("Accept", "")
+        if wants_html:
+            from html import escape
+            body = (
+                "<!doctype html><meta charset='utf-8'>"
+                "<title>m3u-stream — no stream</title>"
+                "<style>body{font-family:system-ui,sans-serif;background:#111;color:#eee;"
+                "padding:2rem;line-height:1.5}a{color:#6ce}</style>"
+                "<h1>No stream is currently running</h1>"
+                f"<p>Open <a href=\"{escape(web_url)}\">{escape(web_url)}</a>, "
+                "pick a channel, and start a stream (Cast to TV / Start stream / "
+                "Watch in browser) first.</p>"
+            ).encode("utf-8")
+            content_type = "text/html; charset=utf-8"
+        else:
+            body = (
+                "No stream is currently running.\n\n"
+                f"Open {web_url} , pick a channel, and start a stream "
+                "(Cast to TV / Start stream / Watch in browser) first.\n"
+            ).encode("utf-8")
+            content_type = "text/plain; charset=utf-8"
+        self.send_response(503)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Retry-After", "5")
+        self._send_cors_headers()
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except Exception:
+            pass
+
     def do_OPTIONS(self):
         self.send_response(204)
         self._send_cors_headers()
@@ -79,6 +110,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def do_HEAD(self):
         path = self.path.split("?", 1)[0]
+        relay: Relay = self.server.relay  # type: ignore[attr-defined]
+        if relay.source is None:
+            self._send_no_stream()
+            return
         self.send_response(200)
         self.send_header("Content-Type", self._content_type_for(path))
         self._send_cors_headers()
@@ -86,25 +121,25 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
+        relay: Relay = self.server.relay  # type: ignore[attr-defined]
+        if relay.source is None:
+            self._send_no_stream()
+            return
         if path.startswith("/hls/"):
-            self._serve_hls(path)
+            self._serve_hls(path, relay)
             return
         if path.endswith(".mp4"):
-            self._serve_ffmpeg_pipe("mp4", "video/mp4")
+            self._serve_ffmpeg_pipe(relay.source, "mp4", "video/mp4")
             return
-        # Default: MPEG-TS (legacy /stream and /stream.ts paths)
-        self._serve_ffmpeg_pipe("mpegts", "video/mpeg")
+        self._serve_ffmpeg_pipe(relay.source, "mpegts", "video/mpeg")
 
-    def _serve_hls(self, path: str):
-        ensure_hls = self.server.ensure_hls  # type: ignore[attr-defined]
-        hls_dir: Path = ensure_hls()
+    def _serve_hls(self, path: str, relay: "Relay"):
+        hls_dir = relay.ensure_hls()
         rel = path[len("/hls/"):]
-        # Disallow path traversal — only allow stream.m3u8 and segNNNNN.ts.
         if rel != "stream.m3u8" and not (rel.startswith("seg") and rel.endswith(".ts")):
             self.send_error(404)
             return
         target = hls_dir / rel
-        # On a cold start the playlist takes a couple of segments to appear.
         wait = HLS_INITIAL_WAIT if rel == "stream.m3u8" else 5.0
         if not target.exists():
             deadline = time.time() + wait
@@ -129,10 +164,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except Exception:
             pass
 
-    def _serve_ffmpeg_pipe(self, kind: str, content_type: str):
-        url = self.server.source_url  # type: ignore[attr-defined]
+    def _serve_ffmpeg_pipe(self, source_url: str, kind: str, content_type: str):
         proc = subprocess.Popen(
-            _ffmpeg_cmd(url, kind),
+            _ffmpeg_cmd(source_url, kind),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
@@ -158,7 +192,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
         if not buf:
             err = b"".join(stderr_buf[-20:]).decode(errors="replace") or "(no ffmpeg output)"
-            log.error("relay produced no bytes for %s (kind=%s)\n%s", url, kind, err)
+            log.error("relay produced no bytes for %s (kind=%s)\n%s", source_url, kind, err)
             body = f"ffmpeg failed:\n{err}".encode()
             self.send_response(502)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
@@ -200,7 +234,9 @@ class _ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
 
 
 class Relay:
-    """An HTTP relay that streams a single source URL through ffmpeg on demand.
+    """Long-running HTTP relay. The TCP server is always listening so that
+    a client hitting /stream.ts /stream.mp4 /hls/* before any stream has
+    been started gets a friendly 503 instead of a connection error.
 
     Paths served on the relay port:
       /stream.ts             MPEG-TS (TV cast, mpv)
@@ -209,65 +245,71 @@ class Relay:
       /hls/segNNNNN.ts       HLS segments
     """
 
-    def __init__(self, port: int):
+    def __init__(self, port: int, web_url: str = ""):
         self.port = port
-        self._server: _ThreadedTCPServer | None = None
-        self._thread: threading.Thread | None = None
+        self.web_url = web_url or "the m3u-stream web UI"
         self._source: str | None = None
+        self._hls_dir = Path(tempfile.mkdtemp(prefix="m3u-stream-hls-"))
         self._hls_proc: subprocess.Popen | None = None
-        self._hls_dir: Path | None = None
-        self._hls_stderr: threading.Thread | None = None
         self._hls_lock = threading.Lock()
         self._hls_last_request_at: float = 0.0
-        self._hls_idle_thread: threading.Thread | None = None
+
+        server = _ThreadedTCPServer(("", port), _Handler)
+        server.relay = self  # type: ignore[attr-defined]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self._server = server
+        self._thread = thread
+        self._wait_for_listen()
+
+        # Idle watcher to stop ffmpeg(hls) when no /hls/ traffic for a while.
+        threading.Thread(target=self._hls_idle_watcher, daemon=True).start()
 
     @property
     def running(self) -> bool:
-        return self._server is not None
+        return self._source is not None
 
     @property
     def source(self) -> str | None:
         return self._source
 
     def start(self, source_url: str) -> None:
-        if self._server is not None:
-            self.stop()
-        hls_dir = Path(tempfile.mkdtemp(prefix="m3u-stream-hls-"))
-        server = _ThreadedTCPServer(("", self.port), _Handler)
-        server.source_url = source_url           # type: ignore[attr-defined]
-        server.ensure_hls = self._ensure_hls     # type: ignore[attr-defined]
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        self._server = server
-        self._thread = thread
+        """Set / switch the upstream source. The HTTP server stays up
+        regardless; only the source URL changes."""
+        if self._source == source_url:
+            return
+        # If the previous source was different, kill its HLS ffmpeg so the
+        # next /hls/ request spawns a fresh one for the new source.
+        self._stop_hls()
         self._source = source_url
-        self._hls_dir = hls_dir
-        self._wait_for_listen()
-        # HLS ffmpeg is started lazily on first /hls/ request and stopped
-        # again after HLS_IDLE_TIMEOUT seconds without traffic.
-        self._hls_idle_thread = threading.Thread(target=self._hls_idle_watcher, daemon=True)
-        self._hls_idle_thread.start()
+        log.info("relay source = %s", source_url)
 
     def stop(self) -> None:
+        """Clear the source. Subsequent /stream.* requests will get 503."""
+        if self._source is None and self._hls_proc is None:
+            return
+        log.info("relay source cleared")
+        self._source = None
         self._stop_hls()
-        if self._server is not None:
+
+    def shutdown(self) -> None:
+        """Final teardown — used when the process is exiting."""
+        self.stop()
+        try:
             self._server.shutdown()
             self._server.server_close()
-        self._server = None
-        self._thread = None
-        self._source = None
-        self._hls_idle_thread = None
-        if self._hls_dir is not None:
-            shutil.rmtree(self._hls_dir, ignore_errors=True)
-            self._hls_dir = None
+        except Exception:
+            pass
+        shutil.rmtree(self._hls_dir, ignore_errors=True)
 
-    def _ensure_hls(self) -> Path:
+    def ensure_hls(self) -> Path:
         """Called by the HTTP handler on each /hls/ request. Starts ffmpeg(hls)
-        if it isn't already running and bumps the last-activity timestamp."""
+        if it isn't already running for the current source, and bumps the
+        last-activity timestamp."""
         with self._hls_lock:
             self._hls_last_request_at = time.time()
-            if self._hls_dir is None or self._source is None:
-                raise RuntimeError("relay not started")
+            if self._source is None:
+                raise RuntimeError("no source set")
             running = self._hls_proc is not None and self._hls_proc.poll() is None
             if not running:
                 log.info("starting ffmpeg(hls) on demand for %s", self._source)
@@ -275,11 +317,9 @@ class Relay:
             return self._hls_dir
 
     def _hls_idle_watcher(self) -> None:
-        while self._server is not None:
+        while True:
             time.sleep(5)
             with self._hls_lock:
-                if self._server is None:
-                    return
                 if self._hls_proc is None or self._hls_proc.poll() is not None:
                     continue
                 if self._hls_last_request_at == 0:
@@ -289,8 +329,6 @@ class Relay:
                     self._stop_hls()
 
     def _start_hls(self, source_url: str, hls_dir: Path) -> None:
-        # Clear any stale segments from a previous run so the new playlist
-        # only references files we're actually writing now.
         for f in hls_dir.iterdir():
             try:
                 f.unlink()
@@ -306,8 +344,7 @@ class Relay:
             for line in self._hls_proc.stderr:
                 log.warning("ffmpeg(hls): %s", line.rstrip().decode(errors="replace"))
 
-        self._hls_stderr = threading.Thread(target=_drain, daemon=True)
-        self._hls_stderr.start()
+        threading.Thread(target=_drain, daemon=True).start()
 
     def _stop_hls(self) -> None:
         if self._hls_proc is not None:

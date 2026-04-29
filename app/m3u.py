@@ -1,12 +1,19 @@
 import re
 from dataclasses import dataclass, field
 from typing import Iterable
+from urllib.parse import urlparse
 
 import requests
 
 
 _EXTINF_ATTR = re.compile(r'([\w-]+)="([^"]*)"')
 _SCHEME = re.compile(r'https?://')
+
+# Logo hosts known to never deliver an image from this app's vantage point
+# (auth-walled, geo-blocked, broken, etc.). Channels whose tvg-logo points at
+# any of these (or a subdomain) get an empty logo so we don't waste a /logo
+# round-trip per render.
+_BLOCKED_LOGO_HOSTS = ("free.fr",)
 
 
 def _clean_url(url: str) -> str:
@@ -19,6 +26,16 @@ def _clean_url(url: str) -> str:
     if len(matches) > 1:
         return url[matches[-1].start():]
     return url
+
+
+def _clean_logo(url: str) -> str:
+    cleaned = _clean_url(url)
+    if not cleaned:
+        return cleaned
+    host = (urlparse(cleaned).hostname or "").lower()
+    if any(host == h or host.endswith("." + h) for h in _BLOCKED_LOGO_HOSTS):
+        return ""
+    return cleaned
 
 
 @dataclass
@@ -42,7 +59,7 @@ def parse(text: str) -> list[Channel]:
             attrs = dict(_EXTINF_ATTR.findall(line))
             name = line.split(",", 1)[1].strip() if "," in line else attrs.get("tvg-name", "")
             group = attrs.get("group-title", "")
-            logo = _clean_url(attrs.get("tvg-logo", ""))
+            logo = _clean_logo(attrs.get("tvg-logo", ""))
             j = i + 1
             while j < len(lines) and (not lines[j].strip() or lines[j].startswith("#")):
                 j += 1

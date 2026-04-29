@@ -1,3 +1,4 @@
+import base64
 import logging
 import os
 import posixpath
@@ -78,12 +79,16 @@ def create_app() -> Flask:
         log.warning("TV_IP not set — Cast to TV is disabled")
 
     relay_port = int(os.environ.get("RELAY_PORT", "8888"))
+    web_port = int(os.environ.get("WEB_PORT", "8080"))
     host_ip = os.environ.get("HOST_IP") or _detect_host_ip(tv_ip or "1.1.1.1")
     lan_base_url = f"http://{host_ip}:{relay_port}"
     relay_base_url_env = (os.environ.get("RELAY_BASE_URL") or "").rstrip("/")
+    web_base_url = (os.environ.get("WEB_BASE_URL") or
+                    f"http://{host_ip}:{web_port}").rstrip("/")
     log.info("host_ip       = %s", host_ip)
     log.info("tv_ip         = %s  (cast %s)",
              tv_ip or "-", "enabled" if tv_ip else "disabled")
+    log.info("web UI        = %s", web_base_url)
     log.info("relay (LAN)   = %s/stream.ts   /stream.mp4   /hls/stream.m3u8", lan_base_url)
     if relay_base_url_env:
         log.info("relay (public)= %s/stream.ts   /stream.mp4   /hls/stream.m3u8", relay_base_url_env)
@@ -93,7 +98,7 @@ def create_app() -> Flask:
         log.error("M3U_URL did not yield any URL")
         sys.exit(2)
 
-    state = AppState(relay_port)
+    state = AppState(relay_port, web_url=web_base_url)
     try:
         state.channels = _load_all(sources)
         log.info("loaded %d channels total from %d source(s)",
@@ -162,18 +167,32 @@ def create_app() -> Flask:
         state.relay.start(channel.url)
         state.current = channel
 
+    # 1×1 transparent PNG, returned in place of any logo we couldn't fetch
+    # so the browser network panel doesn't fill up with red 4xx/5xx rows.
+    _PLACEHOLDER_PNG = base64.b64decode(
+        b"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lE"
+        b"QVR42mNkAAIAAAoAAv/lxKUAAAAASUVORK5CYII="
+    )
+
+    def _placeholder_logo() -> Response:
+        resp = Response(_PLACEHOLDER_PNG, content_type="image/png")
+        # Cache failures briefly so a transient upstream blip doesn't
+        # pin them as broken for a whole day.
+        resp.headers["Cache-Control"] = "public, max-age=300"
+        return resp
+
     @app.get("/logo")
     def logo_route():
         url = request.args.get("url", "").strip()
         if not url or not url.startswith(("http://", "https://")):
-            return ("", 400)
+            return _placeholder_logo()
         try:
             r = requests.get(url, timeout=5, verify=False, stream=True,
                              headers={"User-Agent": "m3u-stream/1.0"})
         except Exception:
-            return ("", 502)
+            return _placeholder_logo()
         if r.status_code != 200:
-            return ("", 404)
+            return _placeholder_logo()
         ct = r.headers.get("Content-Type", "image/png")
         resp = Response(r.iter_content(8192), content_type=ct)
         resp.headers["Cache-Control"] = "public, max-age=86400"
