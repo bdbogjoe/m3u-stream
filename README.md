@@ -48,6 +48,8 @@ docker compose -f docker-compose.yml -f docker-compose.bridge.yml up
 
 In bridge mode you **must** set `HOST_IP` explicitly to the host's LAN IP — the auto-detected source IP from inside the container is the Docker bridge address (e.g. `172.17.0.x`) which the TV can't reach.
 
+> **Casting requires host networking.** DLNA discovery uses SSDP, and many TVs (LG webOS in particular) only answer the multicast probe — Docker's bridge network does not forward multicast, so discovery from a bridge-mode container always fails with `could not discover AVTransport endpoint`. Watch-in-browser and the relay endpoints work fine in bridge mode; only `Cast to TV` requires `network_mode: host`.
+
 ## Configuration (env vars)
 
 | Var          | Required | Default          | Notes                                                                    |
