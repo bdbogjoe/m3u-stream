@@ -73,6 +73,9 @@ main { padding: 1rem 1.5rem; }
 .tile .watch-btn:hover { background: #2a3a4a; color: #9be; }
 .tile:hover { border-color: #444; }
 .tile.hidden { display: none; }
+.tile.offline { display: none; }
+body.show-offline .tile.offline { display: grid; opacity: 0.55; }
+body.show-offline .tile.offline.hidden { display: none; }
 .tile.selected { border-color: #ec6; box-shadow: 0 0 0 1px #ec6 inset; }
 .tile.current { border-color: #6ce; box-shadow: 0 0 0 1px #6ce inset; }
 .tile.selected.current { box-shadow: 0 0 0 1px #6ce inset, 0 0 0 3px #ec6 inset; }

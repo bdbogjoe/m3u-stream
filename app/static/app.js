@@ -4,6 +4,7 @@
   const sourceSel = document.getElementById('source-filter');
   const searchInp = document.getElementById('search');
   const reloadBtn = document.getElementById('reload-btn');
+  const toggleOfflineBtn = document.getElementById('toggle-offline');
   const castBtn = document.getElementById('cast-btn');           // null when TV_IP unset
   const stopBtn = document.getElementById('stop-btn');           // null when TV_IP unset
   const statusEl = document.getElementById('status');
@@ -135,6 +136,24 @@
       renderStatus(j);
       setStatus('Stopped.');
     } catch (err) { setStatus(err.message, true); }
+  });
+
+  const offlineCount = allTiles.filter(t => t.classList.contains('offline')).length;
+  const applyOfflineToggle = () => {
+    const on = localStorage.getItem('show-offline') === '1';
+    document.body.classList.toggle('show-offline', on);
+    if (toggleOfflineBtn) {
+      toggleOfflineBtn.textContent = on
+        ? `Hide offline (${offlineCount})`
+        : `Show offline (${offlineCount})`;
+      toggleOfflineBtn.disabled = offlineCount === 0;
+    }
+  };
+  applyOfflineToggle();
+  if (toggleOfflineBtn) toggleOfflineBtn.addEventListener('click', () => {
+    const on = localStorage.getItem('show-offline') === '1';
+    localStorage.setItem('show-offline', on ? '0' : '1');
+    applyOfflineToggle();
   });
 
   reloadBtn.addEventListener('click', async () => {

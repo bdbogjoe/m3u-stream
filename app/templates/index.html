@@ -21,6 +21,7 @@
     </label>
     <input id="search" type="search" placeholder="Search…">
     <button id="reload-btn" type="button">Reload M3U</button>
+    <button id="toggle-offline" type="button">Show offline</button>
     <span id="status"></span>
   </div>
 
@@ -49,7 +50,7 @@
 <main>
   <div id="grid">
     {% for c in channels %}
-    <div class="tile{% if status.current and c.id == status.current.id %} current{% endif %}"
+    <div class="tile{% if status.current and c.id == status.current.id %} current{% endif %}{% if c.online is sameas false %} offline{% endif %}"
          data-id="{{ c.id }}"
          data-name="{{ c.name|lower }}"
          data-group="{{ c.group }}"
