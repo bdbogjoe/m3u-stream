@@ -354,7 +354,10 @@ def create_app() -> Flask:
         q = lambda v: v.replace('"', "'")
         lines = ["#EXTM3U"]
         for c in chans:
-            attrs = [f'tvg-id="{c.id}"', f'tvg-name="{q(c.name)}"']
+            attrs = []
+            if c.tvg_id:
+                attrs.append(f'tvg-id="{q(c.tvg_id)}"')
+            attrs.append(f'tvg-name="{q(c.name)}"')
             if c.logo:
                 attrs.append(f'tvg-logo="{q(c.logo)}"')
             if c.group:
