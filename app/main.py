@@ -81,8 +81,12 @@ def create_app() -> Flask:
     host_ip = os.environ.get("HOST_IP") or _detect_host_ip(tv_ip or "1.1.1.1")
     lan_base_url = f"http://{host_ip}:{relay_port}"
     relay_base_url_env = (os.environ.get("RELAY_BASE_URL") or "").rstrip("/")
-    log.info("host_ip=%s tv_ip=%s relay_port=%d relay_base_url=%s",
-             host_ip, tv_ip or "(disabled)", relay_port, relay_base_url_env or "(off)")
+    log.info("host_ip       = %s", host_ip)
+    log.info("tv_ip         = %s  (cast %s)",
+             tv_ip or "-", "enabled" if tv_ip else "disabled")
+    log.info("relay (LAN)   = %s/stream.ts   (and /stream.mp4)", lan_base_url)
+    if relay_base_url_env:
+        log.info("relay (public)= %s/stream.ts   (and /stream.mp4)", relay_base_url_env)
 
     sources = _parse_sources(m3u_url)
     if not sources:
