@@ -82,6 +82,7 @@
       const matchQ = !q || tile.dataset.name.includes(q);
       tile.classList.toggle('hidden', !(matchG && matchS && matchQ));
     });
+    updateOfflineUI();
   };
 
   groupSel.addEventListener('change', applyFilter);
@@ -138,22 +139,26 @@
     } catch (err) { setStatus(err.message, true); }
   });
 
-  const offlineCount = allTiles.filter(t => t.classList.contains('offline')).length;
-  const applyOfflineToggle = () => {
+  const updateOfflineUI = () => {
+    // Count offline tiles that the current filter would be willing to show
+    // (i.e. they don't have .hidden) so the toggle reflects what's actually
+    // hidden right now, not the global total.
+    const visibleOffline = allTiles.reduce((n, t) =>
+      n + (t.classList.contains('offline') && !t.classList.contains('hidden') ? 1 : 0), 0);
     const on = localStorage.getItem('show-offline') === '1';
     document.body.classList.toggle('show-offline', on);
     if (toggleOfflineBtn) {
       toggleOfflineBtn.textContent = on
-        ? `Hide offline (${offlineCount})`
-        : `Show offline (${offlineCount})`;
-      toggleOfflineBtn.disabled = offlineCount === 0;
+        ? `Hide offline (${visibleOffline})`
+        : `Show offline (${visibleOffline})`;
+      toggleOfflineBtn.disabled = visibleOffline === 0;
     }
   };
-  applyOfflineToggle();
+  updateOfflineUI();
   if (toggleOfflineBtn) toggleOfflineBtn.addEventListener('click', () => {
     const on = localStorage.getItem('show-offline') === '1';
     localStorage.setItem('show-offline', on ? '0' : '1');
-    applyOfflineToggle();
+    updateOfflineUI();
   });
 
   reloadBtn.addEventListener('click', async () => {
