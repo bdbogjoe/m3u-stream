@@ -63,6 +63,7 @@ In bridge mode you **must** set `HOST_IP` explicitly to the host's LAN IP — th
 | `WEB_BASE_URL`   | no   | —                | Public base URL for the web UI (e.g. `https://m3u.example.com`). Used in the relay's "no stream running" 503 page so the link points at the public UI when reached via the proxy. |
 | `AUTH_USER`, `AUTH_PASS` | no | —          | When both are set, HTTP basic auth is required for proxied requests only. LAN-direct requests stay open so DLNA cast / mpv / VLC keep working without credentials. |
 | `EPG_URL`    | no       | —                | XMLTV URL (plain or `.gz`). When set, each tile shows the current programme. Match is by `tvg-id` first; if the M3U has no `tvg-id`, falls back to comparing the channel name against the XMLTV's `<display-name>` entries (case-insensitive, alphanumerics only). Refreshed every 6h. |
+| `PROBE_INTERVAL` | no   | `600`            | Seconds between automatic per-channel reachability probes. Set to `0` to disable the periodic re-probe (the initial probe at startup and the manual `POST /probe` still run). |
 | `AUTH_TRUSTED_CIDRS` | no | RFC1918 + loopback | Comma-separated CIDRs whose clients bypass auth even when reaching the app through the proxy (read from `X-Forwarded-For`). Default trusts any LAN / private IPv4 + IPv6. |
 | `IMAGE`      | no       | `m3u-stream:local` | Image reference used by `docker-compose.yml`.                            |
 

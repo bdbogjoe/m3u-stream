@@ -9,6 +9,8 @@ import secrets
 import signal
 import subprocess
 import sys
+import threading
+import time
 from urllib.parse import urlparse
 
 if __name__ == "__main__" and __package__ in (None, ""):
@@ -145,6 +147,14 @@ def create_app() -> Flask:
         log.info("EPG_URL       = %s", epg_url)
 
     state.prober.start(state.channels)
+    probe_interval = int(os.environ.get("PROBE_INTERVAL", "600"))
+    if probe_interval > 0:
+        log.info("probe interval = %ds", probe_interval)
+        def _periodic_probe():
+            while True:
+                time.sleep(probe_interval)
+                state.prober.start(state.channels)
+        threading.Thread(target=_periodic_probe, daemon=True).start()
 
     app = Flask(__name__)
     app.config["state"] = state
