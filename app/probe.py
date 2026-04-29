@@ -10,28 +10,25 @@ log = logging.getLogger("m3u-stream.probe")
 
 
 def probe_url(url: str, timeout: float = 4.0) -> bool:
-    """HEAD-based reachability check for a stream URL.
+    """Reachability check that actually verifies the stream produces bytes.
 
-    Treats any 2xx or 3xx response from the *first* hop as "online" —
-    IPTV providers commonly 302 to a token-bound CDN endpoint that
-    only their player follows correctly, so following the redirect
-    chain ourselves leads into hangs and false-offline reports.
-    Network-level errors → False. On 405 (HEAD not allowed) we fall
-    back to a tiny ranged GET, also without redirect following.
+    Some IPTV upstreams happily return HTTP 200 with an empty body when
+    the channel is broken or the token has been consumed (a HEAD-only
+    or status-only check would incorrectly report those as "online" —
+    matching what ffmpeg sees when it fails with "Stream ends
+    prematurely at 0"). So we follow redirects, do a streaming GET, and
+    require at least one non-empty chunk back within `timeout` seconds.
     """
     headers = {"Accept-Encoding": "identity"}
     try:
-        r = requests.head(url, timeout=timeout, allow_redirects=False, headers=headers)
-        if 200 <= r.status_code < 400:
-            return True
-        if r.status_code == 405:
-            r = requests.get(url, timeout=timeout, stream=True, allow_redirects=False,
-                             headers={**headers, "Range": "bytes=0-1023"})
-            try:
-                return 200 <= r.status_code < 400
-            finally:
-                r.close()
-        return False
+        with requests.get(url, timeout=timeout, stream=True,
+                          allow_redirects=True, headers=headers) as r:
+            if r.status_code >= 400:
+                return False
+            for chunk in r.iter_content(1024):
+                if chunk:
+                    return True
+            return False
     except requests.exceptions.RequestException:
         return False
 
