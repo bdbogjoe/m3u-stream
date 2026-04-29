@@ -349,6 +349,14 @@ def create_app() -> Flask:
             try:
                 # Switch cast target → tear down any previous one first.
                 _stop_cast()
+                # Some TVs reject SetAVTransportURI with 701 ("Transition not
+                # available") when they're already playing something we
+                # didn't start. An unconditional Stop forces them back to a
+                # state where SetAVTransportURI is accepted.
+                try:
+                    dlna.stop(control_url)
+                except Exception:
+                    pass
                 dlna.set_uri(control_url, _cast_stream_url(channel), channel.name)
                 dlna.play(control_url)
                 state.current = channel

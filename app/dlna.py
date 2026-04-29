@@ -15,25 +15,30 @@ class DLNAError(RuntimeError):
     pass
 
 
-def discover_control_url(tv_ip: str, timeout: float = 3.0) -> str:
-    """SSDP M-SEARCH for AVTransport, sent unicast to tv_ip:1900.
+def discover_control_url(tv_ip: str, timeout: float = 4.0) -> str:
+    """SSDP M-SEARCH for AVTransport on the LAN.
 
-    Unicast (instead of the usual 239.255.255.250 multicast) so this works
-    in both Docker host networking and bridge networking — multicast is not
-    forwarded across the bridge by default, but unicast UDP is NAT'd just
-    like any other outbound packet.
+    Sends both a unicast probe to tv_ip:1900 and a multicast probe to
+    239.255.255.250:1900 on the same socket, then keeps the first reply
+    coming from tv_ip. Some TVs only answer multicast; sending both
+    covers Docker-bridge (multicast not forwarded → unicast wins) and
+    host/local networking (TV ignores unicast → multicast wins).
     """
-    msg = (
-        "M-SEARCH * HTTP/1.1\r\n"
-        f"HOST: {tv_ip}:1900\r\n"
-        'MAN: "ssdp:discover"\r\n'
-        "MX: 1\r\n"
-        f"ST: {AVTRANSPORT}\r\n\r\n"
-    ).encode()
+    def _msg(host: str, mx: int) -> bytes:
+        return (
+            "M-SEARCH * HTTP/1.1\r\n"
+            f"HOST: {host}\r\n"
+            'MAN: "ssdp:discover"\r\n'
+            f"MX: {mx}\r\n"
+            f"ST: {AVTRANSPORT}\r\n\r\n"
+        ).encode()
+
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
     s.settimeout(timeout)
-    s.sendto(msg, (tv_ip, 1900))
     try:
+        s.sendto(_msg(f"{tv_ip}:1900", 1), (tv_ip, 1900))
+        s.sendto(_msg("239.255.255.250:1900", 2), ("239.255.255.250", 1900))
         while True:
             data, addr = s.recvfrom(4096)
             if addr[0] != tv_ip:
@@ -66,7 +71,7 @@ def _soap(control_url: str, action: str, body_inner: str) -> requests.Response:
         "Content-Type": 'text/xml; charset="utf-8"',
         "SOAPAction": f'"{AVTRANSPORT}#{action}"',
     }
-    return requests.post(control_url, data=envelope, headers=headers, timeout=5)
+    return requests.post(control_url, data=envelope, headers=headers, timeout=20)
 
 
 def set_uri(control_url: str, stream_url: str, title: str) -> None:
@@ -89,7 +94,7 @@ def set_uri(control_url: str, stream_url: str, title: str) -> None:
     )
     r = _soap(control_url, "SetAVTransportURI", body)
     if r.status_code >= 400:
-        raise DLNAError(f"SetAVTransportURI failed: {r.status_code} {r.text[:200]}")
+        raise DLNAError(f"SetAVTransportURI failed: {r.status_code} {r.text[:800]}")
 
 
 def play(control_url: str) -> None:
@@ -99,7 +104,7 @@ def play(control_url: str) -> None:
     )
     r = _soap(control_url, "Play", body)
     if r.status_code >= 400:
-        raise DLNAError(f"Play failed: {r.status_code} {r.text[:200]}")
+        raise DLNAError(f"Play failed: {r.status_code} {r.text[:800]}")
 
 
 def stop(control_url: str) -> None:
@@ -109,4 +114,4 @@ def stop(control_url: str) -> None:
     )
     r = _soap(control_url, "Stop", body)
     if r.status_code >= 400:
-        raise DLNAError(f"Stop failed: {r.status_code} {r.text[:200]}")
+        raise DLNAError(f"Stop failed: {r.status_code} {r.text[:800]}")
