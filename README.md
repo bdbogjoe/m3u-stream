@@ -90,6 +90,9 @@ You'll need `ffmpeg` and `iproute2` available on the host.
 | POST   | `/stop`             | Stop the DLNA cast.                                    |
 | POST   | `/reload`           | Re-fetch all configured M3U URLs.                      |
 | GET    | `/healthz`          | Liveness probe.                                        |
+| GET    | `/all.m3u`          | M3U playlist of all channels, with our relay's stream URLs. |
+| GET    | `/<source>.m3u`     | Same, restricted to one source (e.g. `/france.m3u`).   |
+| GET    | `/<src1>-<src2>.m3u`| Same, restricted to a dash-joined set (e.g. `/france-sport.m3u`). |
 | GET    | `:RELAY_PORT/<id>/stream.ts`   | MPEG-TS for a channel (TV cast / mpv / VLC). |
 | GET    | `:RELAY_PORT/<id>/stream.mp4`  | Fragmented MP4 (Chrome native; iOS 302→HLS). |
 | GET    | `:RELAY_PORT/<id>/stream.m3u8` | HLS playlist for a channel.                  |

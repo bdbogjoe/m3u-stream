@@ -289,6 +289,41 @@ def create_app() -> Flask:
             status=_status_dto(),
         )
 
+    @app.get("/<name>.m3u")
+    def playlist_route(name: str):
+        sources_lower = {s.lower(): s for s in m3u.sources(state.channels)}
+        if name.lower() == "all":
+            wanted: set[str] | None = None
+        elif name.lower() in sources_lower:
+            wanted = {sources_lower[name.lower()]}
+        else:
+            parts = name.split("-")
+            wanted = set()
+            for p in parts:
+                if p.lower() not in sources_lower:
+                    return Response(f"unknown source: {p}\n",
+                                    status=404, content_type="text/plain; charset=utf-8")
+                wanted.add(sources_lower[p.lower()])
+        chans = sorted(
+            state.channels,
+            key=lambda c: (c.source.lower(), c.group.lower(), c.name.lower()),
+        )
+        if wanted is not None:
+            chans = [c for c in chans if c.source in wanted]
+        base = _public_base()
+        q = lambda v: v.replace('"', "'")
+        lines = ["#EXTM3U"]
+        for c in chans:
+            attrs = [f'tvg-id="{c.id}"', f'tvg-name="{q(c.name)}"']
+            if c.logo:
+                attrs.append(f'tvg-logo="{q(c.logo)}"')
+            if c.group:
+                attrs.append(f'group-title="{q(c.group)}"')
+            lines.append(f"#EXTINF:-1 {' '.join(attrs)},{c.name}")
+            lines.append(f"{base}/{_enc(c.id)}/stream.ts")
+        body = "\n".join(lines) + "\n"
+        return Response(body, content_type="audio/x-mpegurl; charset=utf-8")
+
     @app.get("/healthz")
     def healthz():
         return jsonify(ok=True, channels=len(state.channels))
