@@ -12,6 +12,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app/ ./app/
 
 ENV PYTHONUNBUFFERED=1
-EXPOSE 8080 18888
+EXPOSE 8080 8888
 
 CMD ["python", "-m", "app.main"]

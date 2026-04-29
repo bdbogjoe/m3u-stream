@@ -1,7 +1,14 @@
 import logging
 import os
+import posixpath
 import subprocess
 import sys
+from urllib.parse import urlparse
+
+if __name__ == "__main__" and __package__ in (None, ""):
+    import pathlib
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+    __package__ = "app"
 
 from flask import Flask, jsonify, render_template, request
 
@@ -12,9 +19,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("m3u-stream")
 
 
-def _detect_host_ip(tv_ip: str) -> str:
+def _detect_host_ip(target: str) -> str:
     try:
-        out = subprocess.check_output(["ip", "route", "get", tv_ip], text=True)
+        out = subprocess.check_output(["ip", "route", "get", target], text=True)
         for parts in (line.split() for line in out.splitlines()):
             if "src" in parts:
                 return parts[parts.index("src") + 1]
@@ -23,54 +30,139 @@ def _detect_host_ip(tv_ip: str) -> str:
     return "127.0.0.1"
 
 
+def _parse_sources(raw: str) -> list[tuple[str, str]]:
+    """Parse a comma-separated list of M3U URLs.
+
+    Items may be either a bare URL or `name=url`. The source name for a bare
+    URL is derived from the last path segment without the extension.
+    """
+    out: list[tuple[str, str]] = []
+    for item in raw.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if "=" in item:
+            name, _, url = item.partition("=")
+            if url.startswith(("http://", "https://")):
+                out.append((name.strip(), url.strip()))
+                continue
+        path = urlparse(item).path
+        name = posixpath.splitext(posixpath.basename(path))[0] or item
+        out.append((name, item))
+    return out
+
+
+def _load_all(sources: list[tuple[str, str]]) -> list[m3u.Channel]:
+    all_channels: list[m3u.Channel] = []
+    for name, url in sources:
+        channels = m3u.fetch(url)
+        for c in channels:
+            c.source = name
+            c.id = f"{name}:{c.id}"
+        log.info("loaded %d channels from %s (%s)", len(channels), name, url)
+        all_channels.extend(channels)
+    return all_channels
+
+
 def create_app() -> Flask:
     m3u_url = os.environ.get("M3U_URL")
-    tv_ip = os.environ.get("TV_IP")
-    if not m3u_url or not tv_ip:
-        log.error("M3U_URL and TV_IP must be set")
+    tv_ip = os.environ.get("TV_IP") or None
+    if not m3u_url:
+        log.error("M3U_URL must be set")
         sys.exit(2)
+    if not tv_ip:
+        log.warning("TV_IP not set — Cast to TV is disabled")
 
-    relay_port = int(os.environ.get("RELAY_PORT", "18888"))
-    host_ip = os.environ.get("HOST_IP") or _detect_host_ip(tv_ip)
-    log.info("host_ip=%s tv_ip=%s relay_port=%d", host_ip, tv_ip, relay_port)
+    relay_port = int(os.environ.get("RELAY_PORT", "8888"))
+    host_ip = os.environ.get("HOST_IP") or _detect_host_ip(tv_ip or "1.1.1.1")
+    log.info("host_ip=%s tv_ip=%s relay_port=%d",
+             host_ip, tv_ip or "(disabled)", relay_port)
+
+    sources = _parse_sources(m3u_url)
+    if not sources:
+        log.error("M3U_URL did not yield any URL")
+        sys.exit(2)
 
     state = AppState(relay_port)
     try:
-        state.channels = m3u.fetch(m3u_url)
-        log.info("loaded %d channels", len(state.channels))
+        state.channels = _load_all(sources)
+        log.info("loaded %d channels total from %d source(s)",
+                 len(state.channels), len(sources))
     except Exception as e:
         log.error("failed to fetch M3U at startup: %s", e)
         sys.exit(2)
 
     app = Flask(__name__)
     app.config["state"] = state
-    app.config["m3u_url"] = m3u_url
+    app.config["sources"] = sources
     app.config["tv_ip"] = tv_ip
     app.config["host_ip"] = host_ip
 
     def _ensure_control_url() -> str:
+        if not tv_ip:
+            raise dlna.DLNAError("Cast disabled: TV_IP is not set")
         if state.control_url is None:
             state.control_url = dlna.discover_control_url(tv_ip)
             log.info("AVTransport control URL: %s", state.control_url)
         return state.control_url
 
+    relay_stream_url = f"http://{host_ip}:{relay_port}/stream.ts"
+    relay_mp4_url = f"http://{host_ip}:{relay_port}/stream.mp4"
+
     def _channel_dto(c):
-        return {"id": c.id, "name": c.name, "group": c.group, "logo": c.logo}
+        return {"id": c.id, "name": c.name, "group": c.group,
+                "logo": c.logo, "source": c.source, "url": c.url}
+
+    def _status_dto():
+        return {
+            "current": _channel_dto(state.current) if state.current else None,
+            "casting": state.casting,
+            "streaming": state.relay.running,
+            "stream_url": relay_stream_url if state.relay.running else None,
+            "mp4_url": relay_mp4_url if state.relay.running else None,
+            "cast_enabled": bool(tv_ip),
+        }
+
+    def _stop_everything() -> None:
+        if state.casting and state.control_url:
+            try:
+                dlna.stop(state.control_url)
+            except Exception as e:
+                log.warning("dlna stop failed: %s", e)
+        state.casting = False
+        state.relay.stop()
+        state.current = None
+
+    def _start_relay(channel) -> None:
+        if state.relay.running:
+            _stop_everything()
+        state.relay.start(channel.url)
+        state.current = channel
 
     @app.get("/")
     def index():
-        groups = m3u.groups(state.channels)
-        current_id = state.current.id if state.current else None
+        channels = sorted(
+            state.channels,
+            key=lambda c: (c.source.lower(), c.group.lower(), c.name.lower()),
+        )
+        groups = sorted(m3u.groups(state.channels), key=str.lower)
+        srcs = sorted(m3u.sources(state.channels), key=str.lower)
         return render_template(
             "index.html",
-            channels=state.channels,
+            channels=channels,
             groups=groups,
-            current_id=current_id,
+            sources=srcs,
+            status=_status_dto(),
+            mp4_url=relay_mp4_url,
         )
 
     @app.get("/healthz")
     def healthz():
         return jsonify(ok=True, channels=len(state.channels))
+
+    @app.get("/status")
+    def status_route():
+        return jsonify(ok=True, **_status_dto())
 
     @app.post("/cast")
     def cast():
@@ -87,44 +179,48 @@ def create_app() -> Flask:
             except Exception as e:
                 return jsonify(ok=False, error=f"discovery: {e}"), 502
             try:
-                if state.relay.running:
-                    try:
-                        dlna.stop(control_url)
-                    except Exception as e:
-                        log.warning("stop before re-cast failed: %s", e)
-                    state.relay.stop()
-                state.relay.start(channel.url)
-                stream_url = f"http://{host_ip}:{relay_port}/stream"
-                dlna.set_uri(control_url, stream_url, channel.name)
+                _start_relay(channel)
+                dlna.set_uri(control_url, relay_stream_url, channel.name)
                 dlna.play(control_url)
-                state.current = channel
+                state.casting = True
             except Exception as e:
-                state.relay.stop()
-                state.current = None
+                _stop_everything()
                 log.exception("cast failed")
                 return jsonify(ok=False, error=str(e)), 502
-        return jsonify(ok=True, current=_channel_dto(channel))
+        return jsonify(ok=True, **_status_dto())
+
+    @app.post("/stream")
+    def stream_route():
+        data = request.get_json(silent=True) or {}
+        cid = data.get("channel_id")
+        if not cid:
+            return jsonify(ok=False, error="channel_id required"), 400
+        channel = state.channel_by_id(cid)
+        if channel is None:
+            return jsonify(ok=False, error="unknown channel"), 404
+        with state.lock:
+            try:
+                _start_relay(channel)
+            except Exception as e:
+                _stop_everything()
+                log.exception("stream start failed")
+                return jsonify(ok=False, error=str(e)), 502
+        return jsonify(ok=True, **_status_dto())
 
     @app.post("/stop")
     def stop_route():
         with state.lock:
             try:
-                if state.control_url:
-                    try:
-                        dlna.stop(state.control_url)
-                    except Exception as e:
-                        log.warning("dlna stop failed: %s", e)
-                state.relay.stop()
-                state.current = None
+                _stop_everything()
             except Exception as e:
                 log.exception("stop failed")
                 return jsonify(ok=False, error=str(e)), 502
-        return jsonify(ok=True)
+        return jsonify(ok=True, **_status_dto())
 
     @app.post("/reload")
     def reload_route():
         try:
-            channels = m3u.fetch(m3u_url)
+            channels = _load_all(sources)
         except Exception as e:
             return jsonify(ok=False, error=str(e)), 502
         with state.lock:

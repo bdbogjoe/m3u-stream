@@ -15,6 +15,7 @@ class Channel:
     url: str
     group: str = ""
     logo: str = ""
+    source: str = ""
 
 
 def parse(text: str) -> list[Channel]:
@@ -54,4 +55,12 @@ def groups(channels: Iterable[Channel]) -> list[str]:
     for c in channels:
         if c.group:
             seen.setdefault(c.group, None)
+    return list(seen.keys())
+
+
+def sources(channels: Iterable[Channel]) -> list[str]:
+    seen: dict[str, None] = {}
+    for c in channels:
+        if c.source:
+            seen.setdefault(c.source, None)
     return list(seen.keys())

@@ -15,7 +15,8 @@ header {
 }
 header h1 { margin: 0 0 0.5rem 0; font-size: 1.2rem; }
 .controls { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
-.controls input, .controls select, .controls button {
+.controls input, .controls select, .controls button,
+#action-bar button {
   background: #222;
   color: #eee;
   border: 1px solid #333;
@@ -23,10 +24,27 @@ header h1 { margin: 0 0 0.5rem 0; font-size: 1.2rem; }
   border-radius: 4px;
   font: inherit;
 }
-.controls button { cursor: pointer; }
-.controls button:hover { background: #2a2a2a; }
+.controls button, #action-bar button { cursor: pointer; }
+.controls button:hover, #action-bar button:not(:disabled):hover { background: #2a2a2a; }
+#action-bar button:disabled { opacity: 0.4; cursor: not-allowed; }
 #status { color: #aaa; font-size: 0.9rem; min-height: 1em; }
+
+#action-bar {
+  margin-top: 0.6rem;
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+#action-bar .selection { color: #aaa; }
+#action-bar .selection .label { color: #777; margin-right: 0.25rem; }
+#action-bar .buttons { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+#action-bar #stop-btn:not(:disabled) { background: #a33; color: #fee; border-color: #a33; }
+#action-bar #stop-btn:not(:disabled):hover { background: #c44; }
+
 #now-playing { margin-top: 0.5rem; color: #6ce; }
+#now-playing-state { color: #888; margin-right: 0.25rem; }
+#now-playing-stream-link { margin-left: 0.5rem; color: #9bd; font-size: 0.85rem; }
 
 main { padding: 1rem 1.5rem; }
 #grid {
@@ -40,12 +58,17 @@ main { padding: 1rem 1.5rem; }
   border-radius: 6px;
   padding: 0.6rem;
   display: grid;
-  grid-template-columns: 56px 1fr auto;
+  grid-template-columns: 56px 1fr;
   align-items: center;
   gap: 0.6rem;
+  cursor: pointer;
+  user-select: none;
 }
+.tile:hover { border-color: #444; }
 .tile.hidden { display: none; }
+.tile.selected { border-color: #ec6; box-shadow: 0 0 0 1px #ec6 inset; }
 .tile.current { border-color: #6ce; box-shadow: 0 0 0 1px #6ce inset; }
+.tile.selected.current { box-shadow: 0 0 0 1px #6ce inset, 0 0 0 3px #ec6 inset; }
 .tile .logo {
   width: 56px;
   height: 56px;
@@ -59,14 +82,3 @@ main { padding: 1rem 1.5rem; }
 .tile .logo img { max-width: 100%; max-height: 100%; }
 .tile .name { font-weight: 600; }
 .tile .group { color: #888; font-size: 0.8rem; }
-.tile .cast-btn {
-  background: #2c5;
-  color: #042;
-  border: none;
-  padding: 0.4rem 0.7rem;
-  border-radius: 4px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.tile .cast-btn:hover { background: #3d6; }
-.tile.current .cast-btn { background: #555; color: #ccc; cursor: default; }

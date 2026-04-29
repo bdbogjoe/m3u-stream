@@ -3,6 +3,15 @@
 <header>
   <h1>m3u-stream</h1>
   <div class="controls">
+    {% if sources|length > 1 %}
+    <label>
+      Source:
+      <select id="source-filter">
+        <option value="">All</option>
+        {% for s in sources %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+      </select>
+    </label>
+    {% endif %}
     <label>
       Group:
       <select id="group-filter">
@@ -12,21 +21,47 @@
     </label>
     <input id="search" type="search" placeholder="Search…">
     <button id="reload-btn" type="button">Reload M3U</button>
-    <button id="stop-btn" type="button">Stop</button>
     <span id="status"></span>
   </div>
-  <div id="now-playing" {% if not current_id %}hidden{% endif %}>
-    Now playing: <strong id="now-playing-name"></strong>
+
+  <div id="action-bar">
+    <div class="selection">
+      <span class="label">Selected:</span>
+      <strong id="selected-name">— none —</strong>
+    </div>
+    <div class="buttons">
+      {% if status.cast_enabled %}
+      <button id="cast-btn" type="button" disabled>Cast to TV</button>
+      {% endif %}
+      <button id="stream-btn" type="button" disabled>Start stream</button>
+      <button id="watch-btn" type="button" disabled>Watch in browser</button>
+      <button id="stop-btn" type="button" disabled>Stop</button>
+    </div>
+  </div>
+
+  <div id="now-playing"
+       data-current-id="{{ status.current.id if status.current else '' }}"
+       data-casting="{{ '1' if status.casting else '' }}"
+       data-streaming="{{ '1' if status.streaming else '' }}"
+       data-stream-url="{{ status.stream_url or '' }}"
+       {% if not status.current %}hidden{% endif %}>
+    <span id="now-playing-state"></span>
+    <strong id="now-playing-name">{{ status.current.name if status.current else '' }}</strong>
+    <a id="now-playing-stream-link" href="{{ status.stream_url or '' }}" target="_blank"
+       {% if not status.streaming %}hidden{% endif %}>relay URL</a>
   </div>
 </header>
 
-<main>
+<main data-mp4-url="{{ mp4_url }}">
   <div id="grid">
     {% for c in channels %}
-    <div class="tile{% if c.id == current_id %} current{% endif %}"
+    <div class="tile{% if status.current and c.id == status.current.id %} current{% endif %}"
          data-id="{{ c.id }}"
          data-name="{{ c.name|lower }}"
-         data-group="{{ c.group }}">
+         data-group="{{ c.group }}"
+         data-source="{{ c.source }}"
+         data-url="{{ c.url }}"
+         tabindex="0">
       <div class="logo">
         {% if c.logo %}<img loading="lazy" src="{{ c.logo }}" alt="">{% endif %}
       </div>
@@ -34,7 +69,6 @@
         <div class="name">{{ c.name }}</div>
         <div class="group">{{ c.group }}</div>
       </div>
-      <button class="cast-btn" type="button" data-id="{{ c.id }}">Cast</button>
     </div>
     {% endfor %}
   </div>

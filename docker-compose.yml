@@ -7,6 +7,6 @@ services:
       M3U_URL: ${M3U_URL}
       TV_IP: ${TV_IP}
       WEB_PORT: ${WEB_PORT:-8080}
-      RELAY_PORT: ${RELAY_PORT:-18888}
+      RELAY_PORT: ${RELAY_PORT:-8888}
       HOST_IP: ${HOST_IP:-}
     restart: unless-stopped

@@ -12,6 +12,7 @@ class AppState:
         self.relay = Relay(relay_port)
         self.current: Optional[Channel] = None
         self.control_url: Optional[str] = None
+        self.casting: bool = False
 
     def channel_by_id(self, cid: str) -> Optional[Channel]:
         for c in self.channels:
