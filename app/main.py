@@ -79,10 +79,10 @@ def create_app() -> Flask:
 
     relay_port = int(os.environ.get("RELAY_PORT", "8888"))
     host_ip = os.environ.get("HOST_IP") or _detect_host_ip(tv_ip or "1.1.1.1")
-    relay_base_url = (os.environ.get("RELAY_BASE_URL") or
-                      f"http://{host_ip}:{relay_port}").rstrip("/")
+    lan_base_url = f"http://{host_ip}:{relay_port}"
+    relay_base_url_env = (os.environ.get("RELAY_BASE_URL") or "").rstrip("/")
     log.info("host_ip=%s tv_ip=%s relay_port=%d relay_base_url=%s",
-             host_ip, tv_ip or "(disabled)", relay_port, relay_base_url)
+             host_ip, tv_ip or "(disabled)", relay_port, relay_base_url_env or "(off)")
 
     sources = _parse_sources(m3u_url)
     if not sources:
@@ -112,20 +112,32 @@ def create_app() -> Flask:
             log.info("AVTransport control URL: %s", state.control_url)
         return state.control_url
 
-    relay_stream_url = f"{relay_base_url}/stream.ts"
-    relay_mp4_url = f"{relay_base_url}/stream.mp4"
+    # LAN-direct URL used for DLNA cast — the TV needs to reach the relay
+    # by IP and won't resolve an external/proxied hostname.
+    cast_stream_url = f"{lan_base_url}/stream.ts"
+
+    def _is_proxied() -> bool:
+        h = request.headers
+        return any(h.get(x) for x in ("X-Forwarded-Host", "X-Forwarded-Proto",
+                                      "X-Forwarded-For", "Forwarded"))
+
+    def _public_base() -> str:
+        if relay_base_url_env and _is_proxied():
+            return relay_base_url_env
+        return lan_base_url
 
     def _channel_dto(c):
         return {"id": c.id, "name": c.name, "group": c.group,
                 "logo": c.logo, "source": c.source, "url": c.url}
 
     def _status_dto():
+        base = _public_base()
         return {
             "current": _channel_dto(state.current) if state.current else None,
             "casting": state.casting,
             "streaming": state.relay.running,
-            "stream_url": relay_stream_url if state.relay.running else None,
-            "mp4_url": relay_mp4_url if state.relay.running else None,
+            "stream_url": f"{base}/stream.ts" if state.relay.running else None,
+            "mp4_url": f"{base}/stream.mp4" if state.relay.running else None,
             "cast_enabled": bool(tv_ip),
         }
 
@@ -176,7 +188,7 @@ def create_app() -> Flask:
             groups=groups,
             sources=srcs,
             status=_status_dto(),
-            mp4_url=relay_mp4_url,
+            mp4_url=f"{_public_base()}/stream.mp4",
         )
 
     @app.get("/healthz")
@@ -203,7 +215,7 @@ def create_app() -> Flask:
                 return jsonify(ok=False, error=f"discovery: {e}"), 502
             try:
                 _start_relay(channel)
-                dlna.set_uri(control_url, relay_stream_url, channel.name)
+                dlna.set_uri(control_url, cast_stream_url, channel.name)
                 dlna.play(control_url)
                 state.casting = True
             except Exception as e:
