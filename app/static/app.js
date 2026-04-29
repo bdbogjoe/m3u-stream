@@ -151,20 +151,27 @@
     finally { updateActionButtons(); }
   });
 
-  const MP4_URL = document.querySelector('main').dataset.mp4Url || '';
+  const MAIN_EL = document.querySelector('main');
+  const MP4_URL = MAIN_EL.dataset.mp4Url || '';
+  const HLS_URL = MAIN_EL.dataset.hlsUrl || '';
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
   watchBtn.addEventListener('click', async () => {
     if (!selectedTile) return;
-    if (!MP4_URL) { setStatus('mp4 url not configured', true); return; }
     setStatus('Starting stream…');
     watchBtn.disabled = true;
     // Open the tab synchronously so the popup blocker allows it; we'll
-    // navigate to the MP4 URL once the relay is up.
+    // navigate to the playback URL once the relay is up.
     const win = window.open('about:blank', '_blank');
     try {
       const j = await postJson('/stream', { channel_id: selectedTile.dataset.id });
       renderStatus(j);
-      const url = (j.mp4_url || MP4_URL) + '?t=' + Date.now();
+      // iOS WebKit plays HLS natively; everything else gets fragmented MP4.
+      const fallback = isIOS ? HLS_URL : MP4_URL;
+      const target = (isIOS ? j.hls_url : j.mp4_url) || fallback;
+      if (!target) { setStatus('no playback URL', true); if (win) win.close(); return; }
+      const url = target + (target.includes('?') ? '&' : '?') + 't=' + Date.now();
       if (win) win.location.href = url;
       setStatus('Streaming.');
     } catch (err) {

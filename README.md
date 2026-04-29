@@ -90,6 +90,7 @@ You'll need `ffmpeg` and `iproute2` available on the host.
 | GET    | `/healthz`          | Liveness probe.                                        |
 | GET    | `:RELAY_PORT/stream.ts`  | MPEG-TS relay (TV cast / mpv / VLC).              |
 | GET    | `:RELAY_PORT/stream.mp4` | Fragmented MP4 relay (Chrome native playback).    |
+| GET    | `:RELAY_PORT/hls/stream.m3u8` | HLS playlist (iOS / Safari native playback). |
 
 ## Releases
 

@@ -142,6 +142,7 @@ def create_app() -> Flask:
             "streaming": state.relay.running,
             "stream_url": f"{base}/stream.ts" if state.relay.running else None,
             "mp4_url": f"{base}/stream.mp4" if state.relay.running else None,
+            "hls_url": f"{base}/hls/stream.m3u8" if state.relay.running else None,
             "cast_enabled": bool(tv_ip),
         }
 
@@ -193,6 +194,7 @@ def create_app() -> Flask:
             sources=srcs,
             status=_status_dto(),
             mp4_url=f"{_public_base()}/stream.mp4",
+            hls_url=f"{_public_base()}/hls/stream.m3u8",
         )
 
     @app.get("/healthz")

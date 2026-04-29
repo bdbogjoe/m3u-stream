@@ -52,7 +52,7 @@
   </div>
 </header>
 
-<main data-mp4-url="{{ mp4_url }}">
+<main data-mp4-url="{{ mp4_url }}" data-hls-url="{{ hls_url }}">
   <div id="grid">
     {% for c in channels %}
     <div class="tile{% if status.current and c.id == status.current.id %} current{% endif %}"
