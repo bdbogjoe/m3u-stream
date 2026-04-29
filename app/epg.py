@@ -4,6 +4,7 @@ import logging
 import re
 import threading
 import time
+import unicodedata
 import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -12,10 +13,26 @@ from datetime import datetime, timezone
 log = logging.getLogger("m3u-stream.epg")
 
 _NORM_RE = re.compile(r"[^a-z0-9]+")
+# Common quality / variant suffixes that show up on the M3U side but rarely
+# in the XMLTV display-name (and vice-versa). Strip iteratively from the
+# end so "France 2 HD +4" → "France 2 HD" → "France 2".
+_SUFFIX_RE = re.compile(r"\s+(?:hd|uhd|fhd|4k|sd|hevc|\+\d+)\s*$", re.IGNORECASE)
 
 
 def _norm(name: str) -> str:
-    return _NORM_RE.sub("", name.lower())
+    # Strip accents/diacritics first so "Chérie 25" → "cherie25" matches
+    # both the M3U side and an XMLTV display-name with the same accents.
+    nfkd = unicodedata.normalize("NFKD", name)
+    ascii_only = "".join(c for c in nfkd if not unicodedata.combining(c))
+    return _NORM_RE.sub("", ascii_only.lower())
+
+
+def _strip_suffix(name: str) -> str:
+    prev = None
+    while prev != name:
+        prev = name
+        name = _SUFFIX_RE.sub("", name).strip()
+    return name
 
 
 @dataclass(frozen=True)
@@ -92,12 +109,13 @@ class EPG:
                         text = (d.text or "").strip()
                         if not text:
                             continue
-                        key = _norm(text)
                         # First channel wins on collision; XMLTV typically
                         # lists more "canonical" names earlier in the file.
-                        names.setdefault(key, cid)
+                        names.setdefault(_norm(text), cid)
+                        names.setdefault(_norm(_strip_suffix(text)), cid)
                     # Also map the id itself in case the M3U name matches it.
                     names.setdefault(_norm(cid), cid)
+                    names.setdefault(_norm(_strip_suffix(cid)), cid)
                 elem.clear()
         for plist in progs.values():
             plist.sort(key=lambda p: p.start)
@@ -140,7 +158,10 @@ class EPG:
         if not channel_name:
             return None
         with self._lock:
-            return self._name_to_id.get(_norm(channel_name))
+            cid = self._name_to_id.get(_norm(channel_name))
+            if cid is not None:
+                return cid
+            return self._name_to_id.get(_norm(_strip_suffix(channel_name)))
 
     def raw_xml(self) -> bytes:
         """Return the cached XMLTV bytes (uncompressed) for serving as-is."""
