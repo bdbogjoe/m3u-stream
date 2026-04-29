@@ -36,7 +36,6 @@ def _safe_dirname(channel_id: str) -> str:
 def _ffmpeg_cmd(source_url: str, output: str) -> list[str]:
     base = [
         "ffmpeg", "-loglevel", "warning", "-nostdin",
-        "-user_agent", "Mozilla/5.0 (compatible; m3u-stream/1.0)",
         "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
         "-i", source_url,
     ]
@@ -53,7 +52,6 @@ def _ffmpeg_cmd(source_url: str, output: str) -> list[str]:
 def _ffmpeg_hls_cmd(source_url: str, hls_dir: Path) -> list[str]:
     return [
         "ffmpeg", "-loglevel", "warning", "-nostdin",
-        "-user_agent", "Mozilla/5.0 (compatible; m3u-stream/1.0)",
         "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
         "-i", source_url,
         "-c:v", "copy",

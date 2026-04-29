@@ -1,3 +1,4 @@
+import logging
 import re
 import socket
 import urllib.request
@@ -6,6 +7,8 @@ from html import escape
 from urllib.parse import urljoin
 
 import requests
+
+log = logging.getLogger("m3u-stream.dlna")
 
 UPNP_NS = "urn:schemas-upnp-org:device-1-0"
 AVTRANSPORT = "urn:schemas-upnp-org:service:AVTransport:1"
@@ -60,7 +63,10 @@ def discover_control_url(tv_ip: str, timeout: float = 4.0) -> str:
     raise DLNAError(f"could not discover AVTransport endpoint on {tv_ip}")
 
 
-def _soap(control_url: str, action: str, body_inner: str) -> requests.Response:
+def _soap(control_url: str, action: str, body_inner: str) -> requests.Response | None:
+    """Returns the response, or None if the TV accepted the request but
+    didn't ack within our read timeout (common on webOS while it buffers
+    the new stream — the action has actually been performed)."""
     envelope = (
         '<?xml version="1.0"?>'
         '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"'
@@ -71,7 +77,12 @@ def _soap(control_url: str, action: str, body_inner: str) -> requests.Response:
         "Content-Type": 'text/xml; charset="utf-8"',
         "SOAPAction": f'"{AVTRANSPORT}#{action}"',
     }
-    return requests.post(control_url, data=envelope, headers=headers, timeout=20)
+    try:
+        return requests.post(control_url, data=envelope, headers=headers,
+                             timeout=(5, 30))
+    except requests.exceptions.ReadTimeout:
+        log.warning("SOAP %s: TV did not ack in time (continuing anyway)", action)
+        return None
 
 
 def set_uri(control_url: str, stream_url: str, title: str) -> None:
@@ -93,7 +104,7 @@ def set_uri(control_url: str, stream_url: str, title: str) -> None:
         "</u:SetAVTransportURI>"
     )
     r = _soap(control_url, "SetAVTransportURI", body)
-    if r.status_code >= 400:
+    if r is not None and r.status_code >= 400:
         raise DLNAError(f"SetAVTransportURI failed: {r.status_code} {r.text[:800]}")
 
 
@@ -103,7 +114,7 @@ def play(control_url: str) -> None:
         "<InstanceID>0</InstanceID><Speed>1</Speed></u:Play>"
     )
     r = _soap(control_url, "Play", body)
-    if r.status_code >= 400:
+    if r is not None and r.status_code >= 400:
         raise DLNAError(f"Play failed: {r.status_code} {r.text[:800]}")
 
 
@@ -113,5 +124,5 @@ def stop(control_url: str) -> None:
         "<InstanceID>0</InstanceID></u:Stop>"
     )
     r = _soap(control_url, "Stop", body)
-    if r.status_code >= 400:
+    if r is not None and r.status_code >= 400:
         raise DLNAError(f"Stop failed: {r.status_code} {r.text[:800]}")
