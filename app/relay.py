@@ -1,6 +1,5 @@
 import http.server
 import logging
-import os
 import shutil
 import socket
 import socketserver
@@ -11,6 +10,9 @@ import time
 from pathlib import Path
 
 log = logging.getLogger("m3u-stream.relay")
+
+HLS_IDLE_TIMEOUT = 30.0   # stop ffmpeg(hls) after this many seconds without a request
+HLS_INITIAL_WAIT = 10.0   # wait this long for the first playlist to appear
 
 
 def _ffmpeg_cmd(source_url: str, output: str) -> list[str]:
@@ -94,16 +96,18 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self._serve_ffmpeg_pipe("mpegts", "video/mpeg")
 
     def _serve_hls(self, path: str):
-        hls_dir: Path = self.server.hls_dir  # type: ignore[attr-defined]
+        ensure_hls = self.server.ensure_hls  # type: ignore[attr-defined]
+        hls_dir: Path = ensure_hls()
         rel = path[len("/hls/"):]
         # Disallow path traversal — only allow stream.m3u8 and segNNNNN.ts.
         if rel != "stream.m3u8" and not (rel.startswith("seg") and rel.endswith(".ts")):
             self.send_error(404)
             return
         target = hls_dir / rel
-        # Wait briefly for ffmpeg to produce the playlist on first hit.
+        # On a cold start the playlist takes a couple of segments to appear.
+        wait = HLS_INITIAL_WAIT if rel == "stream.m3u8" else 5.0
         if not target.exists():
-            deadline = time.time() + 5.0
+            deadline = time.time() + wait
             while time.time() < deadline and not target.exists():
                 time.sleep(0.1)
         if not target.exists():
@@ -213,6 +217,9 @@ class Relay:
         self._hls_proc: subprocess.Popen | None = None
         self._hls_dir: Path | None = None
         self._hls_stderr: threading.Thread | None = None
+        self._hls_lock = threading.Lock()
+        self._hls_last_request_at: float = 0.0
+        self._hls_idle_thread: threading.Thread | None = None
 
     @property
     def running(self) -> bool:
@@ -228,7 +235,7 @@ class Relay:
         hls_dir = Path(tempfile.mkdtemp(prefix="m3u-stream-hls-"))
         server = _ThreadedTCPServer(("", self.port), _Handler)
         server.source_url = source_url           # type: ignore[attr-defined]
-        server.hls_dir = hls_dir                 # type: ignore[attr-defined]
+        server.ensure_hls = self._ensure_hls     # type: ignore[attr-defined]
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         self._server = server
@@ -236,7 +243,10 @@ class Relay:
         self._source = source_url
         self._hls_dir = hls_dir
         self._wait_for_listen()
-        self._start_hls(source_url, hls_dir)
+        # HLS ffmpeg is started lazily on first /hls/ request and stopped
+        # again after HLS_IDLE_TIMEOUT seconds without traffic.
+        self._hls_idle_thread = threading.Thread(target=self._hls_idle_watcher, daemon=True)
+        self._hls_idle_thread.start()
 
     def stop(self) -> None:
         self._stop_hls()
@@ -246,11 +256,46 @@ class Relay:
         self._server = None
         self._thread = None
         self._source = None
+        self._hls_idle_thread = None
         if self._hls_dir is not None:
             shutil.rmtree(self._hls_dir, ignore_errors=True)
             self._hls_dir = None
 
+    def _ensure_hls(self) -> Path:
+        """Called by the HTTP handler on each /hls/ request. Starts ffmpeg(hls)
+        if it isn't already running and bumps the last-activity timestamp."""
+        with self._hls_lock:
+            self._hls_last_request_at = time.time()
+            if self._hls_dir is None or self._source is None:
+                raise RuntimeError("relay not started")
+            running = self._hls_proc is not None and self._hls_proc.poll() is None
+            if not running:
+                log.info("starting ffmpeg(hls) on demand for %s", self._source)
+                self._start_hls(self._source, self._hls_dir)
+            return self._hls_dir
+
+    def _hls_idle_watcher(self) -> None:
+        while self._server is not None:
+            time.sleep(5)
+            with self._hls_lock:
+                if self._server is None:
+                    return
+                if self._hls_proc is None or self._hls_proc.poll() is not None:
+                    continue
+                if self._hls_last_request_at == 0:
+                    continue
+                if time.time() - self._hls_last_request_at > HLS_IDLE_TIMEOUT:
+                    log.info("HLS idle for %.0fs, stopping ffmpeg(hls)", HLS_IDLE_TIMEOUT)
+                    self._stop_hls()
+
     def _start_hls(self, source_url: str, hls_dir: Path) -> None:
+        # Clear any stale segments from a previous run so the new playlist
+        # only references files we're actually writing now.
+        for f in hls_dir.iterdir():
+            try:
+                f.unlink()
+            except OSError:
+                pass
         cmd = _ffmpeg_hls_cmd(source_url, hls_dir)
         self._hls_proc = subprocess.Popen(
             cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
