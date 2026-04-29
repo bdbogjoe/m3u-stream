@@ -1,0 +1,72 @@
+* { box-sizing: border-box; }
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  margin: 0;
+  background: #111;
+  color: #eee;
+}
+header {
+  padding: 1rem 1.5rem;
+  background: #1a1a1a;
+  border-bottom: 1px solid #2a2a2a;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+header h1 { margin: 0 0 0.5rem 0; font-size: 1.2rem; }
+.controls { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+.controls input, .controls select, .controls button {
+  background: #222;
+  color: #eee;
+  border: 1px solid #333;
+  padding: 0.35rem 0.6rem;
+  border-radius: 4px;
+  font: inherit;
+}
+.controls button { cursor: pointer; }
+.controls button:hover { background: #2a2a2a; }
+#status { color: #aaa; font-size: 0.9rem; min-height: 1em; }
+#now-playing { margin-top: 0.5rem; color: #6ce; }
+
+main { padding: 1rem 1.5rem; }
+#grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+.tile {
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  padding: 0.6rem;
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  align-items: center;
+  gap: 0.6rem;
+}
+.tile.hidden { display: none; }
+.tile.current { border-color: #6ce; box-shadow: 0 0 0 1px #6ce inset; }
+.tile .logo {
+  width: 56px;
+  height: 56px;
+  background: #0a0a0a;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.tile .logo img { max-width: 100%; max-height: 100%; }
+.tile .name { font-weight: 600; }
+.tile .group { color: #888; font-size: 0.8rem; }
+.tile .cast-btn {
+  background: #2c5;
+  color: #042;
+  border: none;
+  padding: 0.4rem 0.7rem;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tile .cast-btn:hover { background: #3d6; }
+.tile.current .cast-btn { background: #555; color: #ccc; cursor: default; }
