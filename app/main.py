@@ -238,6 +238,11 @@ def create_app() -> Flask:
             return relay_base_url_env
         return lan_base_url
 
+    def _public_web_base() -> str:
+        if web_public_url and _is_proxied():
+            return web_public_url
+        return web_lan_url
+
     def _enc(cid: str) -> str:
         from urllib.parse import quote
         return quote(cid, safe="")
@@ -352,11 +357,19 @@ def create_app() -> Flask:
             chans = [c for c in chans if c.source in wanted]
         base = _public_base()
         q = lambda v: v.replace('"', "'")
-        lines = ["#EXTM3U"]
+        header = "#EXTM3U"
+        if epg:
+            header += f' x-tvg-url="{_public_web_base()}/epg.xml"'
+        lines = [header]
         for c in chans:
             attrs = []
-            if c.tvg_id:
-                attrs.append(f'tvg-id="{q(c.tvg_id)}"')
+            # Prefer the EPG-matched id so the tvg-id in our output keys
+            # the same channel as our /epg.xml. Fall back to the source
+            # tvg-id only if the EPG can't match by name.
+            epg_id = epg.id_for(c.name) if epg else None
+            tvg_id = epg_id or c.tvg_id
+            if tvg_id:
+                attrs.append(f'tvg-id="{q(tvg_id)}"')
             attrs.append(f'tvg-name="{q(c.name)}"')
             if c.logo:
                 attrs.append(f'tvg-logo="{q(c.logo)}"')
@@ -366,6 +379,20 @@ def create_app() -> Flask:
             lines.append(f"{base}/{_enc(c.id)}/stream.ts")
         body = "\n".join(lines) + "\n"
         return Response(body, content_type="audio/x-mpegurl; charset=utf-8")
+
+    @app.get("/epg.xml")
+    def epg_route():
+        if not epg:
+            return Response("EPG not configured (set EPG_URL)\n",
+                            status=404, content_type="text/plain; charset=utf-8")
+        data = epg.raw_xml()
+        if not data:
+            return Response("EPG not loaded yet, try again in a few seconds\n",
+                            status=503, content_type="text/plain; charset=utf-8",
+                            headers={"Retry-After": "5"})
+        resp = Response(data, content_type="application/xml; charset=utf-8")
+        resp.headers["Cache-Control"] = "public, max-age=900"
+        return resp
 
     @app.get("/healthz")
     def healthz():

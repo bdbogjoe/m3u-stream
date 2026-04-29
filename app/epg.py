@@ -45,6 +45,7 @@ class EPG:
         self.ttl = ttl_seconds
         self._programmes: dict[str, list[Programme]] = {}
         self._name_to_id: dict[str, str] = {}
+        self._raw_xml: bytes = b""
         self._lock = threading.Lock()
         self._loaded = threading.Event()
         threading.Thread(target=self._refresher, daemon=True).start()
@@ -68,6 +69,7 @@ class EPG:
             data = r.read()
         if data[:2] == b"\x1f\x8b":
             data = gzip.decompress(data)
+        raw_xml = data
         progs: dict[str, list[Programme]] = {}
         names: dict[str, str] = {}
         now = datetime.now(timezone.utc)
@@ -102,6 +104,7 @@ class EPG:
         with self._lock:
             self._programmes = progs
             self._name_to_id = names
+            self._raw_xml = raw_xml
         log.info("EPG loaded: %d channels with programmes, %d display-names",
                  len(progs), len(names))
 
@@ -131,3 +134,15 @@ class EPG:
         if p is None:
             return None
         return f"{p.title} · until {p.stop.astimezone().strftime('%H:%M')}"
+
+    def id_for(self, channel_name: str) -> str | None:
+        """Return the XMLTV channel id matching a channel name, or None."""
+        if not channel_name:
+            return None
+        with self._lock:
+            return self._name_to_id.get(_norm(channel_name))
+
+    def raw_xml(self) -> bytes:
+        """Return the cached XMLTV bytes (uncompressed) for serving as-is."""
+        with self._lock:
+            return self._raw_xml
