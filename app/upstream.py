@@ -22,6 +22,11 @@ READ_TIMEOUT = 30.0
 RECONNECT_BACKOFF_BASE = 0.25
 RECONNECT_BACKOFF_MAX = 5.0
 RECONNECT_MAX_ATTEMPTS = 12
+# Give up if we open the upstream this many times in a row and each response
+# yields zero bytes — usually means the channel is dead but the HTTP server
+# still answers 200. Bailing out lets the consumer (ffmpeg) wind down so
+# downstream client-disconnect handling can run.
+EMPTY_BODY_GIVE_UP = 5
 
 
 class UpstreamReader:
@@ -52,6 +57,7 @@ class UpstreamReader:
 
     def stream(self) -> Iterator[bytes]:
         attempt = 0
+        consecutive_empty = 0
         while not self._stop:
             try:
                 resp = self._open()
@@ -68,6 +74,7 @@ class UpstreamReader:
 
             self._resp = resp
             attempt = 0
+            bytes_this_session = 0
 
             try:
                 while not self._stop:
@@ -78,6 +85,7 @@ class UpstreamReader:
                         break
                     if not chunk:
                         break
+                    bytes_this_session += len(chunk)
                     yield chunk
             finally:
                 try:
@@ -89,5 +97,13 @@ class UpstreamReader:
 
             if self._stop:
                 return
+            if bytes_this_session == 0:
+                consecutive_empty += 1
+                if consecutive_empty >= EMPTY_BODY_GIVE_UP:
+                    log.error("upstream produced %d consecutive empty responses; giving up",
+                              consecutive_empty)
+                    return
+            else:
+                consecutive_empty = 0
             log.info("upstream connection closed, reconnecting")
             time.sleep(RECONNECT_BACKOFF_BASE)
