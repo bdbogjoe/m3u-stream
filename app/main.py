@@ -141,10 +141,10 @@ def create_app() -> Flask:
         log.error("failed to fetch M3U at startup: %s", e)
         sys.exit(2)
 
-    epg_url = (os.environ.get("EPG_URL") or "").strip()
-    epg: EPG | None = EPG(epg_url) if epg_url else None
+    epg_urls = [u.strip() for u in (os.environ.get("EPG_URL") or "").split(",") if u.strip()]
+    epg: EPG | None = EPG(epg_urls) if epg_urls else None
     if epg:
-        log.info("EPG_URL       = %s", epg_url)
+        log.info("EPG_URL       = %s", ", ".join(epg_urls))
 
     state.prober.start(state.channels)
     probe_interval = int(os.environ.get("PROBE_INTERVAL", "600"))

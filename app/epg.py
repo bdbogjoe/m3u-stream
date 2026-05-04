@@ -52,13 +52,18 @@ def _parse_time(s: str) -> datetime | None:
 class EPG:
     """In-memory XMLTV index keyed by `<channel id>`.
 
-    A background thread fetches and parses the XMLTV file every `ttl`
-    seconds. `current(tvg_id)` returns the programme whose [start, stop)
-    interval contains "now", or None.
+    A background thread fetches and parses one or more XMLTV files every
+    `ttl` seconds and merges their channels and programmes. `current(tvg_id)`
+    returns the programme whose [start, stop) interval contains "now", or None.
+
+    On id collision across feeds, the first feed wins; later feeds only fill
+    in channels the earlier ones don't cover.
     """
 
-    def __init__(self, url: str, ttl_seconds: int = 6 * 3600):
-        self.url = url
+    def __init__(self, urls: str | list[str], ttl_seconds: int = 6 * 3600):
+        if isinstance(urls, str):
+            urls = [u.strip() for u in urls.split(",") if u.strip()]
+        self.urls = list(urls)
         self.ttl = ttl_seconds
         self._programmes: dict[str, list[Programme]] = {}
         self._name_to_id: dict[str, str] = {}
@@ -79,52 +84,70 @@ class EPG:
                 continue
             time.sleep(self.ttl)
 
-    def _refresh(self) -> None:
-        log.info("fetching EPG from %s", self.url)
-        req = urllib.request.Request(self.url, headers={"User-Agent": "m3u-stream-epg/1.0"})
+    def _fetch_one(self, url: str) -> bytes:
+        log.info("fetching EPG from %s", url)
+        req = urllib.request.Request(url, headers={"User-Agent": "m3u-stream-epg/1.0"})
         with urllib.request.urlopen(req, timeout=60) as r:
             data = r.read()
         if data[:2] == b"\x1f\x8b":
             data = gzip.decompress(data)
-        raw_xml = data
+        return data
+
+    def _refresh(self) -> None:
         progs: dict[str, list[Programme]] = {}
         names: dict[str, str] = {}
+        merged_root = ET.Element("tv")
         now = datetime.now(timezone.utc)
-        for _, elem in ET.iterparse(io.BytesIO(data), events=("end",)):
-            if elem.tag == "programme":
-                start = _parse_time(elem.get("start", ""))
-                stop = _parse_time(elem.get("stop", ""))
-                cid = elem.get("channel", "")
-                # Only keep programmes that could still be "current" or
-                # "upcoming" — anything that already ended is dead weight.
-                if start and stop and cid and stop > now:
-                    title = (elem.findtext("title") or "").strip()
-                    if title:
-                        progs.setdefault(cid, []).append(Programme(start, stop, title))
-                elem.clear()
-            elif elem.tag == "channel":
-                cid = elem.get("id", "")
-                if cid:
-                    for d in elem.findall("display-name"):
-                        text = (d.text or "").strip()
-                        if not text:
-                            continue
-                        # First channel wins on collision; XMLTV typically
-                        # lists more "canonical" names earlier in the file.
-                        names.setdefault(_norm(text), cid)
-                        names.setdefault(_norm(_strip_suffix(text)), cid)
-                    # Also map the id itself in case the M3U name matches it.
-                    names.setdefault(_norm(cid), cid)
-                    names.setdefault(_norm(_strip_suffix(cid)), cid)
-                elem.clear()
+        ok_urls = 0
+        for url in self.urls:
+            try:
+                data = self._fetch_one(url)
+            except Exception as e:
+                log.warning("EPG fetch failed for %s: %s", url, e)
+                continue
+            ok_urls += 1
+            for _, elem in ET.iterparse(io.BytesIO(data), events=("end",)):
+                if elem.tag == "programme":
+                    start = _parse_time(elem.get("start", ""))
+                    stop = _parse_time(elem.get("stop", ""))
+                    cid = elem.get("channel", "")
+                    # Only keep programmes that could still be "current" or
+                    # "upcoming" — anything that already ended is dead weight.
+                    if start and stop and cid and stop > now:
+                        title = (elem.findtext("title") or "").strip()
+                        if title:
+                            progs.setdefault(cid, []).append(Programme(start, stop, title))
+                        merged_root.append(elem)
+                        continue  # don't clear — element is now owned by merged_root
+                    elem.clear()
+                elif elem.tag == "channel":
+                    cid = elem.get("id", "")
+                    if cid:
+                        for d in elem.findall("display-name"):
+                            text = (d.text or "").strip()
+                            if not text:
+                                continue
+                            # First feed/name wins on collision; XMLTV typically
+                            # lists more "canonical" names earlier in the file.
+                            names.setdefault(_norm(text), cid)
+                            names.setdefault(_norm(_strip_suffix(text)), cid)
+                        # Also map the id itself in case the M3U name matches it.
+                        names.setdefault(_norm(cid), cid)
+                        names.setdefault(_norm(_strip_suffix(cid)), cid)
+                        merged_root.append(elem)
+                        continue  # don't clear — element is now owned by merged_root
+                    elem.clear()
+        if ok_urls == 0:
+            raise RuntimeError("no EPG source could be fetched")
         for plist in progs.values():
             plist.sort(key=lambda p: p.start)
+        raw_xml = ET.tostring(merged_root, encoding="utf-8", xml_declaration=True)
         with self._lock:
             self._programmes = progs
             self._name_to_id = names
             self._raw_xml = raw_xml
-        log.info("EPG loaded: %d channels with programmes, %d display-names",
-                 len(progs), len(names))
+        log.info("EPG loaded: %d channels with programmes, %d display-names from %d/%d source(s)",
+                 len(progs), len(names), ok_urls, len(self.urls))
 
     def _current_for_id(self, cid: str) -> Programme | None:
         now = datetime.now(timezone.utc)
