@@ -98,7 +98,7 @@
     if (watch) {
       const tile = watch.closest('.tile');
       if (!tile) return;
-      window.open(tile.dataset.watchUrl, '_blank', 'noopener');
+      window.location.href = tile.dataset.watchUrl;
       e.stopPropagation();
       return;
     }
