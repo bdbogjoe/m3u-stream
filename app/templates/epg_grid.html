@@ -80,6 +80,20 @@
       cellsByCid.get(cid).push(cell);
     });
 
+    const rebuildGroupOptions = () => {
+      const s = sourceSel ? sourceSel.value : '';
+      const previous = groupSel.value;
+      const groups = new Set();
+      channelCells.forEach(ch => {
+        if (s && ch.dataset.source !== s) return;
+        if (ch.dataset.group) groups.add(ch.dataset.group);
+      });
+      const sorted = Array.from(groups).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+      groupSel.innerHTML = '<option value="">All</option>'
+        + sorted.map(g => `<option value="${g.replace(/"/g, '&quot;')}">${g}</option>`).join('');
+      if (sorted.includes(previous)) groupSel.value = previous;
+    };
+
     const apply = () => {
       const s = sourceSel ? sourceSel.value : '';
       const g = groupSel.value;
@@ -110,9 +124,13 @@
         ? `${total} channels` : `${visible} / ${total}`;
     };
 
-    if (sourceSel) sourceSel.addEventListener('change', apply);
+    if (sourceSel) sourceSel.addEventListener('change', () => {
+      rebuildGroupOptions();
+      apply();
+    });
     groupSel.addEventListener('change', apply);
     searchInp.addEventListener('input', apply);
+    rebuildGroupOptions();
     apply();
   })();
 </script>
