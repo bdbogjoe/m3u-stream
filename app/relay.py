@@ -16,6 +16,9 @@ import urllib.parse
 from pathlib import Path
 from typing import Callable, Optional
 
+from .tsdedup import TsDedup
+from .upstream import UpstreamReader
+
 log = logging.getLogger("m3u-stream.relay")
 
 HLS_IDLE_TIMEOUT = 30.0   # stop ffmpeg(hls) after this many seconds without a request
@@ -33,12 +36,10 @@ def _safe_dirname(channel_id: str) -> str:
     return hashlib.sha1(channel_id.encode("utf-8")).hexdigest()[:16]
 
 
-def _ffmpeg_cmd(source_url: str, output: str) -> list[str]:
+def _ffmpeg_cmd(output: str) -> list[str]:
     base = [
         "ffmpeg", "-loglevel", "warning", "-nostdin",
-        "-headers", "Accept-Encoding: identity\r\n",
-        "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
-        "-i", source_url,
+        "-i", "pipe:0",
     ]
     if output == "mp4":
         return base + [
@@ -50,12 +51,10 @@ def _ffmpeg_cmd(source_url: str, output: str) -> list[str]:
     return base + ["-c", "copy", "-f", "mpegts", "pipe:1"]
 
 
-def _ffmpeg_hls_cmd(source_url: str, hls_dir: Path) -> list[str]:
+def _ffmpeg_hls_cmd(hls_dir: Path) -> list[str]:
     return [
         "ffmpeg", "-loglevel", "warning", "-nostdin",
-        "-headers", "Accept-Encoding: identity\r\n",
-        "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
-        "-i", source_url,
+        "-i", "pipe:0",
         "-c:v", "copy",
         "-c:a", "aac", "-b:a", "128k", "-ac", "2",
         "-f", "hls",
@@ -73,6 +72,7 @@ class _StreamCtx:
         self.source_url = source_url
         self.hls_dir = hls_dir
         self.hls_proc: subprocess.Popen | None = None
+        self.hls_reader: UpstreamReader | None = None
         self.hls_last_request_at: float = 0.0
 
 
@@ -249,10 +249,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def _serve_ffmpeg_pipe(self, source_url: str, kind: str, content_type: str):
         proc = subprocess.Popen(
-            _ffmpeg_cmd(source_url, kind),
+            _ffmpeg_cmd(kind),
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
+        reader = UpstreamReader(source_url)
+        dedup = TsDedup()
         stderr_buf: list[bytes] = []
 
         def _drain_stderr():
@@ -263,7 +266,22 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 stderr_buf.append(line)
                 log.warning("ffmpeg: %s", line.rstrip().decode(errors="replace"))
 
+        def _pump_stdin():
+            try:
+                for chunk in dedup.filter(reader.stream()):
+                    if proc.stdin is None:
+                        return
+                    try:
+                        proc.stdin.write(chunk)
+                    except (BrokenPipeError, ValueError, OSError):
+                        return
+            finally:
+                if proc.stdin is not None:
+                    try: proc.stdin.close()
+                    except Exception: pass
+
         threading.Thread(target=_drain_stderr, daemon=True).start()
+        threading.Thread(target=_pump_stdin, daemon=True).start()
 
         target = 188 * 100 if kind != "mp4" else 32 * 1024
         buf = b""
@@ -284,6 +302,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             try: self.wfile.write(body)
             except Exception: pass
+            reader.close()
             proc.kill()
             return
 
@@ -303,6 +322,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except Exception:
             pass
         finally:
+            reader.close()
             proc.kill()
 
     def log_message(self, *args):
@@ -435,19 +455,44 @@ class Relay:
         for f in ctx.hls_dir.iterdir():
             try: f.unlink()
             except OSError: pass
-        cmd = _ffmpeg_hls_cmd(ctx.source_url, ctx.hls_dir)
+        cmd = _ffmpeg_hls_cmd(ctx.hls_dir)
         ctx.hls_proc = subprocess.Popen(
-            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            cmd, stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
         )
+        ctx.hls_reader = UpstreamReader(ctx.source_url)
+        dedup = TsDedup()
 
         def _drain():
             assert ctx.hls_proc and ctx.hls_proc.stderr
             for line in ctx.hls_proc.stderr:
                 log.warning("ffmpeg(hls): %s", line.rstrip().decode(errors="replace"))
 
+        def _pump():
+            reader = ctx.hls_reader
+            proc = ctx.hls_proc
+            assert reader is not None and proc is not None
+            try:
+                for chunk in dedup.filter(reader.stream()):
+                    if proc.stdin is None:
+                        return
+                    try:
+                        proc.stdin.write(chunk)
+                    except (BrokenPipeError, ValueError, OSError):
+                        return
+            finally:
+                if proc.stdin is not None:
+                    try: proc.stdin.close()
+                    except Exception: pass
+
         threading.Thread(target=_drain, daemon=True).start()
+        threading.Thread(target=_pump, daemon=True).start()
 
     def _stop_hls(self, ctx: _StreamCtx) -> None:
+        if ctx.hls_reader is not None:
+            try: ctx.hls_reader.close()
+            except Exception: pass
+            ctx.hls_reader = None
         if ctx.hls_proc is not None:
             try:
                 ctx.hls_proc.terminate()
