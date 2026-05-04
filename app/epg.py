@@ -40,6 +40,7 @@ class Programme:
     start: datetime
     stop: datetime
     title: str
+    category: str = ""
 
 
 def _parse_time(s: str) -> datetime | None:
@@ -123,7 +124,20 @@ class EPG:
                             seen.add(key)
                             title = (elem.findtext("title") or "").strip()
                             if title:
-                                progs.setdefault(cid, []).append(Programme(start, stop, title))
+                                # Pick the best category: prefer lang="fr",
+                                # else first non-empty <category>.
+                                category = ""
+                                for cat in elem.findall("category"):
+                                    text = (cat.text or "").strip()
+                                    if not text:
+                                        continue
+                                    if cat.get("lang") == "fr":
+                                        category = text
+                                        break
+                                    if not category:
+                                        category = text
+                                progs.setdefault(cid, []).append(
+                                    Programme(start, stop, title, category))
                             merged_root.append(elem)
                             continue  # don't clear — element is now owned by merged_root
                     elem.clear()

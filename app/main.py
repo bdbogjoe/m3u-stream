@@ -23,7 +23,7 @@ import urllib3
 from flask import Flask, Response, jsonify, render_template, request
 
 from . import dlna, m3u
-from .epg import EPG
+from .epg import EPG, _norm as _norm_text
 from .state import AppState
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -443,6 +443,11 @@ def create_app() -> Flask:
             for i in range(SLOT_COUNT)
         ]
         rows = []
+        # key (normalized) -> canonical label; prefer the variant with the most
+        # non-ASCII chars (i.e. accented "Cinéma" wins over plain "Cinema").
+        cat_labels: dict[str, str] = {}
+        def _accent_count(s: str) -> int:
+            return sum(1 for c in s if ord(c) > 127)
         for ch in state.channels:
             progs = epg.schedule(tvg_id=ch.tvg_id, channel_name=ch.name)
             programmes = []
@@ -457,9 +462,16 @@ def create_app() -> Flask:
                 col_end = min(SLOT_COUNT + 2, _math.ceil(stop_min / SLOT_MIN) + 2)
                 if col_end <= col_start:
                     col_end = col_start + 1
+                cat_key = _norm_text(p.category) if p.category else ""
+                if cat_key:
+                    existing = cat_labels.get(cat_key)
+                    if existing is None or _accent_count(p.category) > _accent_count(existing):
+                        cat_labels[cat_key] = p.category
                 programmes.append({
                     "title": p.title,
                     "time": p.start.astimezone().strftime("%H:%M"),
+                    "category": p.category,
+                    "category_key": cat_key,
                     "col_start": col_start,
                     "col_end": col_end,
                     "is_current": p.start <= now < p.stop,
@@ -470,6 +482,7 @@ def create_app() -> Flask:
         now_slots = (now - window_start).total_seconds() / 60 / SLOT_MIN
         groups = sorted(m3u.groups(state.channels), key=str.lower)
         srcs = sorted(m3u.sources(state.channels), key=str.lower)
+        categories = sorted(cat_labels.items(), key=lambda kv: kv[1].lower())
         return render_template(
             "epg_grid.html",
             rows=rows,
@@ -478,6 +491,7 @@ def create_app() -> Flask:
             now_slots=now_slots,
             groups=groups,
             sources=srcs,
+            categories=categories,
         )
 
     @app.get("/<cid>/epg")
