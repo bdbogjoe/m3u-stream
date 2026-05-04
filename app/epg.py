@@ -97,6 +97,10 @@ class EPG:
         progs: dict[str, list[Programme]] = {}
         names: dict[str, str] = {}
         merged_root = ET.Element("tv")
+        # Some XMLTV feeds (notably epgshare01's FR1) publish each programme
+        # twice — once with UTC timestamps, once with the local-tz form. Both
+        # parse to the same datetime, so we de-dup on (channel, start instant).
+        seen: set[tuple[str, datetime]] = set()
         now = datetime.now(timezone.utc)
         ok_urls = 0
         for url in self.urls:
@@ -114,11 +118,14 @@ class EPG:
                     # Only keep programmes that could still be "current" or
                     # "upcoming" — anything that already ended is dead weight.
                     if start and stop and cid and stop > now:
-                        title = (elem.findtext("title") or "").strip()
-                        if title:
-                            progs.setdefault(cid, []).append(Programme(start, stop, title))
-                        merged_root.append(elem)
-                        continue  # don't clear — element is now owned by merged_root
+                        key = (cid, start)
+                        if key not in seen:
+                            seen.add(key)
+                            title = (elem.findtext("title") or "").strip()
+                            if title:
+                                progs.setdefault(cid, []).append(Programme(start, stop, title))
+                            merged_root.append(elem)
+                            continue  # don't clear — element is now owned by merged_root
                     elem.clear()
                 elif elem.tag == "channel":
                     cid = elem.get("id", "")
