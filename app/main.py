@@ -441,7 +441,7 @@ def create_app() -> Flask:
         rows = []
         for ch in state.channels:
             progs = epg.schedule(tvg_id=ch.tvg_id, channel_name=ch.name)
-            items = []
+            programmes = []
             for p in progs:
                 if p.stop <= window_start or p.start >= window_end:
                     continue
@@ -453,15 +453,15 @@ def create_app() -> Flask:
                 col_end = min(SLOT_COUNT + 2, _math.ceil(stop_min / SLOT_MIN) + 2)
                 if col_end <= col_start:
                     col_end = col_start + 1
-                items.append({
+                programmes.append({
                     "title": p.title,
                     "time": p.start.astimezone().strftime("%H:%M"),
                     "col_start": col_start,
                     "col_end": col_end,
                     "is_current": p.start <= now < p.stop,
                 })
-            if items:
-                rows.append({"channel": ch, "items": items})
+            if programmes:
+                rows.append({"channel": ch, "programmes": programmes})
         # "Now" position expressed in slot-widths past the start of the timeline.
         now_slots = (now - window_start).total_seconds() / 60 / SLOT_MIN
         return render_template(

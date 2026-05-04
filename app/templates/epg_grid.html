@@ -24,12 +24,12 @@
         {% endif %}
         <a href="/{{ row.channel.id|urlencode }}/watch">{{ row.channel.name }}</a>
       </div>
-      {% for item in row.items %}
-        <div class="epg-cell programme{% if item.is_current %} current{% endif %}"
-             style="grid-row:{{ ridx }}; grid-column:{{ item.col_start }} / {{ item.col_end }};"
-             title="{{ item.time }} · {{ item.title }}">
-          <div class="programme-time">{{ item.time }}</div>
-          <div class="programme-title">{{ item.title }}</div>
+      {% for p in row.programmes %}
+        <div class="epg-cell programme{% if p.is_current %} current{% endif %}"
+             style="grid-row:{{ ridx }}; grid-column:{{ p.col_start }} / {{ p.col_end }};"
+             title="{{ p.time }} · {{ p.title }}">
+          <div class="programme-time">{{ p.time }}</div>
+          <div class="programme-title">{{ p.title }}</div>
         </div>
       {% endfor %}
     {% endfor %}
