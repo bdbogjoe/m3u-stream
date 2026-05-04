@@ -162,6 +162,10 @@ def create_app() -> Flask:
     app.config["tv_ip"] = tv_ip
     app.config["host_ip"] = host_ip
 
+    @app.context_processor
+    def _inject_epg_flag():
+        return {"has_epg": epg is not None}
+
     def _shutdown_cleanup():
         # Tell the TV to stop pulling our relay URL — otherwise webOS keeps
         # trying long after the process is gone.
@@ -478,12 +482,14 @@ def create_app() -> Flask:
 
     @app.get("/<cid>/epg")
     def channel_epg_route(cid: str):
+        if not epg:
+            return Response("EPG not configured (set EPG_URL)\n", status=404,
+                            content_type="text/plain; charset=utf-8")
         channel = state.channel_by_id(cid)
         if channel is None:
             return Response("unknown channel\n", status=404,
                             content_type="text/plain; charset=utf-8")
-        progs = (epg.schedule(tvg_id=channel.tvg_id, channel_name=channel.name)
-                 if epg else [])
+        progs = epg.schedule(tvg_id=channel.tvg_id, channel_name=channel.name)
         from datetime import datetime as _dt, timezone as _tz
         now = _dt.now(_tz.utc)
         by_day: list[tuple[str, list[dict]]] = []
@@ -504,7 +510,6 @@ def create_app() -> Flask:
             "epg_channel.html",
             channel=channel,
             by_day=by_day,
-            has_epg=epg is not None,
         )
 
     @app.get("/epg.xml")

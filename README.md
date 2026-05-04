@@ -66,6 +66,7 @@ In bridge mode you **must** set `HOST_IP` explicitly to the host's LAN IP — th
 | `PROBE_INTERVAL` | no   | `600`            | Seconds between automatic per-channel reachability probes. Set to `0` to disable the periodic re-probe (the initial probe at startup and the manual `POST /probe` still run). |
 | `AUTH_TRUSTED_CIDRS` | no | RFC1918 + loopback | Comma-separated CIDRs whose clients bypass auth even when reaching the app through the proxy (read from `X-Forwarded-For`). Default trusts any LAN / private IPv4 + IPv6. |
 | `IMAGE`      | no       | `m3u-stream:local` | Image reference used by `docker-compose.yml`.                            |
+| `TZ`         | no       | `Europe/Paris`   | Container timezone. Controls how EPG times (e.g. `until 22:45`) are displayed. Set to your local zone (e.g. `America/New_York`) to override. |
 
 ### Multi-source M3U examples
 

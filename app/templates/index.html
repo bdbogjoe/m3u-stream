@@ -22,7 +22,7 @@
     <input id="search" type="search" placeholder="Search…">
     <button id="reload-btn" type="button">Reload M3U</button>
     <button id="toggle-offline" type="button">Show offline</button>
-    <a id="epg-link" href="/epg">📅 TV Guide</a>
+    {% if has_epg %}<a id="epg-link" href="/epg">📅 TV Guide</a>{% endif %}
     <span id="status"></span>
   </div>
 

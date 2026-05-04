@@ -14,4 +14,5 @@ services:
       AUTH_USER: ${AUTH_USER:-}
       AUTH_PASS: ${AUTH_PASS:-}
       AUTH_TRUSTED_CIDRS: ${AUTH_TRUSTED_CIDRS:-}
+      TZ: ${TZ:-Europe/Paris}
     restart: unless-stopped

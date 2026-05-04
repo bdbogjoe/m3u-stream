@@ -15,10 +15,12 @@
         {% if current_programme %}
         <div class="watch-programme current">📺 {{ current_programme }}</div>
         {% endif %}
-        {% if not current_programme and not schedule %}
+        {% if has_epg and not current_programme and not schedule %}
         <div class="watch-programme none">No EPG data for this channel.</div>
         {% endif %}
+        {% if has_epg %}
         <div class="watch-actions"><a href="/{{ channel.id|urlencode }}/epg">📅 full schedule</a></div>
+        {% endif %}
       </div>
     </div>
   </header>

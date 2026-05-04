@@ -17,9 +17,7 @@
     </div>
   </header>
 
-  {% if not has_epg %}
-    <p class="watch-programme none">EPG not configured.</p>
-  {% elif not by_day %}
+  {% if not by_day %}
     <p class="watch-programme none">No EPG data for this channel.</p>
   {% endif %}
 
