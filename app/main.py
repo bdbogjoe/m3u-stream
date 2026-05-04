@@ -406,13 +406,13 @@ def create_app() -> Flask:
         cid_enc = _enc(channel.id)
         current = (epg.format_current(tvg_id=channel.tvg_id, channel_name=channel.name)
                    if epg else None)
-        nxt = (epg.format_next(tvg_id=channel.tvg_id, channel_name=channel.name)
-               if epg else None)
+        schedule = (epg.format_upcoming(tvg_id=channel.tvg_id, channel_name=channel.name, n=6)
+                    if epg else [])
         return render_template(
             "watch.html",
             channel=channel,
             current_programme=current,
-            next_programme=nxt,
+            schedule=schedule,
             mp4_url=f"{base}/{cid_enc}/stream.mp4",
             hls_url=f"{base}/{cid_enc}/stream.m3u8",
         )

@@ -168,6 +168,18 @@ class EPG:
                 return p
         return None
 
+    def _upcoming_for_id(self, cid: str, n: int) -> list[Programme]:
+        now = datetime.now(timezone.utc)
+        with self._lock:
+            progs = self._programmes.get(cid, [])
+        out: list[Programme] = []
+        for p in progs:
+            if p.start > now:
+                out.append(p)
+                if len(out) >= n:
+                    break
+        return out
+
     def current(self, tvg_id: str = "", channel_name: str = "") -> Programme | None:
         if tvg_id:
             p = self._current_for_id(tvg_id)
@@ -199,6 +211,22 @@ class EPG:
         if p is None:
             return None
         return f"{p.title} · at {p.start.astimezone().strftime('%H:%M')}"
+
+    def upcoming(self, tvg_id: str = "", channel_name: str = "", n: int = 6) -> list[Programme]:
+        if tvg_id:
+            out = self._upcoming_for_id(tvg_id, n)
+            if out:
+                return out
+        cid = self.id_for(channel_name)
+        if cid:
+            return self._upcoming_for_id(cid, n)
+        return []
+
+    def format_upcoming(self, tvg_id: str = "", channel_name: str = "", n: int = 6) -> list[tuple[str, str]]:
+        return [
+            (p.start.astimezone().strftime("%H:%M"), p.title)
+            for p in self.upcoming(tvg_id=tvg_id, channel_name=channel_name, n=n)
+        ]
 
     def id_for(self, channel_name: str) -> str | None:
         """Return the XMLTV channel id matching a channel name, or None."""

@@ -65,10 +65,8 @@
         {% endif %}
       </div>
       <div class="meta">
-        <div class="name">
-          {{ c.name }}
-          {% if c.current_programme %}<span class="programme-badge" title="{{ c.current_programme }}">📺</span>{% endif %}
-        </div>
+        <div class="name">{{ c.name }}</div>
+        {% if c.current_programme %}<div class="programme" title="{{ c.current_programme }}">📺 {{ c.current_programme }}</div>{% endif %}
         <div class="group">{{ c.group }}</div>
       </div>
       <button class="watch-btn" type="button" title="Watch in browser">▶</button>
