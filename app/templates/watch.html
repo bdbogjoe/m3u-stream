@@ -18,13 +18,14 @@
         {% if not current_programme and not schedule %}
         <div class="watch-programme none">No EPG data for this channel.</div>
         {% endif %}
+        <div class="watch-actions"><a href="/{{ channel.id|urlencode }}/epg">📅 full schedule</a></div>
       </div>
     </div>
   </header>
   <video id="player" controls autoplay muted playsinline></video>
   {% if schedule %}
   <section class="watch-schedule">
-    <h2>Coming up</h2>
+    <h2><a href="/{{ channel.id|urlencode }}/epg">Coming up · full schedule →</a></h2>
     <ul>
       {% for time, title in schedule %}
       <li><span class="time">{{ time }}</span><span class="title">{{ title }}</span></li>

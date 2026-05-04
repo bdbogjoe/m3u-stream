@@ -49,7 +49,7 @@ header h1 { margin: 0 0 0.5rem 0; font-size: 1.2rem; }
 main { padding: 1rem 1.5rem; }
 #grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 0.75rem;
 }
 .tile {
@@ -105,7 +105,13 @@ body.show-offline .tile.offline.hidden { display: none; }
 }
 .tile .status-dot.online { background: #4caf50; }
 .tile .status-dot.offline { background: #c33; }
-.tile .name { font-weight: 600; }
+.tile .meta { min-width: 0; }
+.tile .name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .tile .group { color: #888; font-size: 0.8rem; }
 .tile .programme {
   font-size: 0.8rem;
@@ -189,3 +195,39 @@ body.show-offline .tile.offline.hidden { display: none; }
   min-width: 3.5rem;
 }
 .watch-schedule .title { color: #ddd; }
+.watch-schedule h2 a { color: inherit; text-decoration: none; }
+.watch-schedule h2 a:hover { color: #ec6; }
+.watch-actions { margin-top: 0.4rem; font-size: 0.95rem; }
+.watch-actions a { color: #6ce; text-decoration: none; }
+.watch-actions a:hover { text-decoration: underline; }
+
+.epg-day { max-width: 1200px; margin: 1.25rem auto 0; padding: 0 1.5rem; }
+.epg-day h2 {
+  font-size: 0.95rem;
+  color: #aaa;
+  font-weight: 600;
+  margin: 0 0 0.5rem 0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.epg-day ul { list-style: none; padding: 0; margin: 0; }
+.epg-day li {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.45rem 0.5rem;
+  border-bottom: 1px solid #222;
+  font-size: 0.95rem;
+}
+.epg-day li:last-child { border-bottom: 0; }
+.epg-day li.current {
+  background: #1a2a3a;
+  border-left: 3px solid #6ce;
+  padding-left: 0.5rem;
+}
+.epg-day .time {
+  color: #ec6;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  min-width: 3.5rem;
+}
+.epg-day .title { color: #ddd; }

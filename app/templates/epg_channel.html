@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}{{ channel.name }} — EPG{% endblock %}
+{% block content %}
+<div class="watch">
+  <header class="watch-header">
+    <a href="/" class="back">← back</a>
+    <div class="watch-info">
+      {% if channel.logo %}
+      <img class="watch-logo" src="{{ url_for('logo_route', url=channel.logo) }}" alt=""
+           onerror="this.style.display='none'">
+      {% endif %}
+      <div class="watch-meta">
+        <h1>{{ channel.name }} — schedule</h1>
+        <div class="watch-group">{{ channel.group }}{% if channel.source %} · {{ channel.source }}{% endif %}</div>
+        <div class="watch-actions"><a href="/{{ channel.id|urlencode }}/watch">▶ watch</a></div>
+      </div>
+    </div>
+  </header>
+
+  {% if not has_epg %}
+    <p class="watch-programme none">EPG not configured.</p>
+  {% elif not by_day %}
+    <p class="watch-programme none">No EPG data for this channel.</p>
+  {% endif %}
+
+  {% for day, items in by_day %}
+  <section class="epg-day">
+    <h2>{{ day }}</h2>
+    <ul>
+      {% for it in items %}
+      <li{% if it.is_current %} class="current"{% endif %}>
+        <span class="time">{{ it.time }}</span><span class="title">{{ it.title }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endfor %}
+</div>
+{% endblock %}

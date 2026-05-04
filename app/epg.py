@@ -187,6 +187,13 @@ class EPG:
                     break
         return out
 
+    def _schedule_for_id(self, cid: str) -> list[Programme]:
+        """All programmes for `cid` that haven't ended yet, sorted by start."""
+        now = datetime.now(timezone.utc)
+        with self._lock:
+            progs = self._programmes.get(cid, [])
+        return [p for p in progs if p.stop > now]
+
     def current(self, tvg_id: str = "", channel_name: str = "") -> Programme | None:
         if tvg_id:
             p = self._current_for_id(tvg_id)
@@ -234,6 +241,16 @@ class EPG:
             (p.start.astimezone().strftime("%H:%M"), p.title)
             for p in self.upcoming(tvg_id=tvg_id, channel_name=channel_name, n=n)
         ]
+
+    def schedule(self, tvg_id: str = "", channel_name: str = "") -> list[Programme]:
+        if tvg_id:
+            out = self._schedule_for_id(tvg_id)
+            if out:
+                return out
+        cid = self.id_for(channel_name)
+        if cid:
+            return self._schedule_for_id(cid)
+        return []
 
     def id_for(self, channel_name: str) -> str | None:
         """Return the XMLTV channel id matching a channel name, or None."""

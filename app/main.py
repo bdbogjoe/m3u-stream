@@ -417,6 +417,37 @@ def create_app() -> Flask:
             hls_url=f"{base}/{cid_enc}/stream.m3u8",
         )
 
+    @app.get("/<cid>/epg")
+    def channel_epg_route(cid: str):
+        channel = state.channel_by_id(cid)
+        if channel is None:
+            return Response("unknown channel\n", status=404,
+                            content_type="text/plain; charset=utf-8")
+        progs = (epg.schedule(tvg_id=channel.tvg_id, channel_name=channel.name)
+                 if epg else [])
+        from datetime import datetime as _dt, timezone as _tz
+        now = _dt.now(_tz.utc)
+        by_day: list[tuple[str, list[dict]]] = []
+        last_key = None
+        for p in progs:
+            local_start = p.start.astimezone()
+            day_key = local_start.strftime("%Y-%m-%d")
+            day_label = local_start.strftime("%A %d %B")
+            if day_key != last_key:
+                by_day.append((day_label, []))
+                last_key = day_key
+            by_day[-1][1].append({
+                "time": local_start.strftime("%H:%M"),
+                "title": p.title,
+                "is_current": p.start <= now < p.stop,
+            })
+        return render_template(
+            "epg_channel.html",
+            channel=channel,
+            by_day=by_day,
+            has_epg=epg is not None,
+        )
+
     @app.get("/epg.xml")
     def epg_route():
         if not epg:
