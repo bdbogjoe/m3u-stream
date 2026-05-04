@@ -25,6 +25,14 @@ header h1 { margin: 0 0 0.5rem 0; font-size: 1.2rem; }
   font: inherit;
 }
 .controls button, #action-bar button { cursor: pointer; }
+#epg-link {
+  color: #6ce;
+  text-decoration: none;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid #2a3a4a;
+  border-radius: 4px;
+}
+#epg-link:hover { background: #2a3a4a; color: #9be; }
 .controls button:hover, #action-bar button:not(:disabled):hover { background: #2a2a2a; }
 #action-bar button:disabled { opacity: 0.4; cursor: not-allowed; }
 #status { color: #aaa; font-size: 0.9rem; min-height: 1em; }
@@ -231,3 +239,103 @@ body.show-offline .tile.offline.hidden { display: none; }
   min-width: 3.5rem;
 }
 .epg-day .title { color: #ddd; }
+
+/* full TV-guide grid */
+.epg-grid-header {
+  padding: 1rem 1.5rem;
+  background: #1a1a1a;
+  border-bottom: 1px solid #2a2a2a;
+}
+.epg-grid-header h1 { margin: 0.4rem 0 0; font-size: 1.2rem; }
+.epg-grid-header .back { color: #9bd; text-decoration: none; font-size: 0.9rem; }
+.epg-grid-header .back:hover { text-decoration: underline; }
+.epg-grid-wrap {
+  padding: 1rem;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+.epg-grid {
+  --slot-w: 110px;
+  --channel-w: 200px;
+  --row-h: 56px;
+  display: grid;
+  position: relative;
+  grid-template-columns: var(--channel-w) repeat(var(--slots, 16), var(--slot-w));
+  grid-auto-rows: var(--row-h);
+  gap: 1px;
+  background: #2a2a2a;
+  width: max-content;
+}
+.epg-cell {
+  background: #1a1a1a;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.85rem;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.epg-cell.head {
+  position: sticky;
+  top: 0;
+  background: #222;
+  z-index: 3;
+  color: #aaa;
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  align-items: center;
+  justify-content: center;
+}
+.epg-cell.head.channel-head { left: 0; z-index: 4; }
+.epg-cell.channel {
+  position: sticky;
+  left: 0;
+  background: #181818;
+  z-index: 2;
+  flex-direction: row;
+  gap: 0.4rem;
+  align-items: center;
+}
+.epg-cell.channel img {
+  width: 32px; height: 32px;
+  object-fit: contain;
+  background: #0a0a0a;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.epg-cell.channel a {
+  color: #ddd;
+  text-decoration: none;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.epg-cell.channel a:hover { color: #6ce; }
+.epg-cell.programme.current {
+  background: #1a2a3a;
+  border-left: 3px solid #6ce;
+}
+.epg-cell.programme .programme-time {
+  color: #ec6;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 0.15rem;
+}
+.epg-cell.programme .programme-title {
+  color: #ddd;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.epg-now-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #ec6;
+  pointer-events: none;
+  z-index: 5;
+}

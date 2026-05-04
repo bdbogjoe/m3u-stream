@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}TV Guide — m3u-stream{% endblock %}
+{% block content %}
+<header class="epg-grid-header">
+  <a href="/" class="back">← back</a>
+  <h1>TV Guide</h1>
+</header>
+
+{% if not rows %}
+<p style="padding: 1rem 1.5rem; color:#888;">No EPG data available in the next 8 hours.</p>
+{% else %}
+<div class="epg-grid-wrap">
+  <div class="epg-grid" style="--slots:{{ slot_count }};">
+    <div class="epg-cell head channel-head" style="grid-row:1; grid-column:1;">Channel</div>
+    {% for label in slot_labels %}
+      <div class="epg-cell head time-head" style="grid-row:1; grid-column:{{ loop.index + 1 }};">{{ label }}</div>
+    {% endfor %}
+
+    {% for row in rows %}
+      {% set ridx = loop.index + 1 %}
+      <div class="epg-cell channel" style="grid-row:{{ ridx }}; grid-column:1;">
+        {% if row.channel.logo %}
+        <img src="{{ url_for('logo_route', url=row.channel.logo) }}" alt="" onerror="this.style.display='none'">
+        {% endif %}
+        <a href="/{{ row.channel.id|urlencode }}/watch">{{ row.channel.name }}</a>
+      </div>
+      {% for item in row.items %}
+        <div class="epg-cell programme{% if item.is_current %} current{% endif %}"
+             style="grid-row:{{ ridx }}; grid-column:{{ item.col_start }} / {{ item.col_end }};"
+             title="{{ item.time }} · {{ item.title }}">
+          <div class="programme-time">{{ item.time }}</div>
+          <div class="programme-title">{{ item.title }}</div>
+        </div>
+      {% endfor %}
+    {% endfor %}
+
+    <div class="epg-now-line" style="left: calc(var(--channel-w) + var(--slot-w) * {{ '%.4f'|format(now_slots) }});"></div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

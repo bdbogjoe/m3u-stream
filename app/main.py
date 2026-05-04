@@ -417,6 +417,61 @@ def create_app() -> Flask:
             hls_url=f"{base}/{cid_enc}/stream.m3u8",
         )
 
+    @app.get("/epg")
+    def epg_grid_route():
+        if not epg:
+            return Response("EPG not configured (set EPG_URL)\n", status=404,
+                            content_type="text/plain; charset=utf-8")
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        import math as _math
+        SLOT_MIN = 30
+        SLOT_COUNT = 16  # 8 hours
+        now = _dt.now(_tz.utc)
+        local_now = now.astimezone()
+        window_start_local = local_now.replace(
+            minute=(local_now.minute // SLOT_MIN) * SLOT_MIN,
+            second=0, microsecond=0,
+        )
+        window_start = window_start_local.astimezone(_tz.utc)
+        window_end = window_start + _td(minutes=SLOT_MIN * SLOT_COUNT)
+        slot_labels = [
+            (window_start_local + _td(minutes=SLOT_MIN * i)).strftime("%H:%M")
+            for i in range(SLOT_COUNT)
+        ]
+        rows = []
+        for ch in state.channels:
+            progs = epg.schedule(tvg_id=ch.tvg_id, channel_name=ch.name)
+            items = []
+            for p in progs:
+                if p.stop <= window_start or p.start >= window_end:
+                    continue
+                start_min = (p.start - window_start).total_seconds() / 60
+                stop_min = (p.stop - window_start).total_seconds() / 60
+                # Grid columns: col 1 is channel, cols 2..(SLOT_COUNT+1) are slots,
+                # col SLOT_COUNT+2 is the trailing line (exclusive end).
+                col_start = max(2, _math.floor(start_min / SLOT_MIN) + 2)
+                col_end = min(SLOT_COUNT + 2, _math.ceil(stop_min / SLOT_MIN) + 2)
+                if col_end <= col_start:
+                    col_end = col_start + 1
+                items.append({
+                    "title": p.title,
+                    "time": p.start.astimezone().strftime("%H:%M"),
+                    "col_start": col_start,
+                    "col_end": col_end,
+                    "is_current": p.start <= now < p.stop,
+                })
+            if items:
+                rows.append({"channel": ch, "items": items})
+        # "Now" position expressed in slot-widths past the start of the timeline.
+        now_slots = (now - window_start).total_seconds() / 60 / SLOT_MIN
+        return render_template(
+            "epg_grid.html",
+            rows=rows,
+            slot_labels=slot_labels,
+            slot_count=SLOT_COUNT,
+            now_slots=now_slots,
+        )
+
     @app.get("/<cid>/epg")
     def channel_epg_route(cid: str):
         channel = state.channel_by_id(cid)
