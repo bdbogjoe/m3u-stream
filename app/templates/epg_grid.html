@@ -4,6 +4,26 @@
 <header class="epg-grid-header">
   <a href="/" class="back">← back</a>
   <h1>TV Guide</h1>
+  <div class="controls">
+    {% if sources|length > 1 %}
+    <label>
+      Source:
+      <select id="epg-source-filter">
+        <option value="">All</option>
+        {% for s in sources %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+      </select>
+    </label>
+    {% endif %}
+    <label>
+      Group:
+      <select id="epg-group-filter">
+        <option value="">All</option>
+        {% for g in groups %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
+      </select>
+    </label>
+    <input id="epg-search" type="search" placeholder="Search…">
+    <span id="epg-count"></span>
+  </div>
 </header>
 
 {% if not rows %}
@@ -18,7 +38,12 @@
 
     {% for row in rows %}
       {% set ridx = loop.index + 1 %}
-      <div class="epg-cell channel" style="grid-row:{{ ridx }}; grid-column:1;">
+      <div class="epg-cell channel"
+           data-cid="{{ row.channel.id }}"
+           data-source="{{ row.channel.source }}"
+           data-group="{{ row.channel.group }}"
+           data-name="{{ row.channel.name|lower }}"
+           style="grid-row:{{ ridx }}; grid-column:1;">
         {% if row.channel.logo %}
         <img src="{{ url_for('logo_route', url=row.channel.logo) }}" alt="" onerror="this.style.display='none'">
         {% endif %}
@@ -26,6 +51,7 @@
       </div>
       {% for p in row.programmes %}
         <div class="epg-cell programme{% if p.is_current %} current{% endif %}"
+             data-cid="{{ row.channel.id }}"
              style="grid-row:{{ ridx }}; grid-column:{{ p.col_start }} / {{ p.col_end }};"
              title="{{ p.time }} · {{ p.title }}">
           <div class="programme-time">{{ p.time }}</div>
@@ -37,5 +63,58 @@
     <div class="epg-now-line" style="left: calc(var(--channel-w) + var(--slot-w) * {{ '%.4f'|format(now_slots) }});"></div>
   </div>
 </div>
+<script>
+  (() => {
+    const sourceSel = document.getElementById('epg-source-filter');
+    const groupSel = document.getElementById('epg-group-filter');
+    const searchInp = document.getElementById('epg-search');
+    const countEl = document.getElementById('epg-count');
+    const grid = document.querySelector('.epg-grid');
+    if (!grid) return;
+    const channelCells = Array.from(grid.querySelectorAll('.epg-cell.channel'));
+    // Group cells by data-cid for fast lookup.
+    const cellsByCid = new Map();
+    grid.querySelectorAll('.epg-cell[data-cid]').forEach(cell => {
+      const cid = cell.dataset.cid;
+      if (!cellsByCid.has(cid)) cellsByCid.set(cid, []);
+      cellsByCid.get(cid).push(cell);
+    });
+
+    const apply = () => {
+      const s = sourceSel ? sourceSel.value : '';
+      const g = groupSel.value;
+      const q = searchInp.value.trim().toLowerCase();
+      let nextRow = 2; // row 1 is the time header
+      let visible = 0, total = channelCells.length;
+      channelCells.forEach(ch => {
+        const cid = ch.dataset.cid;
+        const matchS = !s || ch.dataset.source === s;
+        const matchG = !g || ch.dataset.group === g;
+        const matchQ = !q || ch.dataset.name.includes(q);
+        const cells = cellsByCid.get(cid) || [];
+        if (matchS && matchG && matchQ) {
+          visible++;
+          const row = String(nextRow++);
+          cells.forEach(c => {
+            c.style.display = '';
+            // Preserve grid-column on programmes (set via inline style); only
+            // rewrite grid-row.
+            c.style.gridRowStart = row;
+            c.style.gridRowEnd = '';
+          });
+        } else {
+          cells.forEach(c => { c.style.display = 'none'; });
+        }
+      });
+      if (countEl) countEl.textContent = visible === total
+        ? `${total} channels` : `${visible} / ${total}`;
+    };
+
+    if (sourceSel) sourceSel.addEventListener('change', apply);
+    groupSel.addEventListener('change', apply);
+    searchInp.addEventListener('input', apply);
+    apply();
+  })();
+</script>
 {% endif %}
 {% endblock %}

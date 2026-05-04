@@ -464,12 +464,16 @@ def create_app() -> Flask:
                 rows.append({"channel": ch, "programmes": programmes})
         # "Now" position expressed in slot-widths past the start of the timeline.
         now_slots = (now - window_start).total_seconds() / 60 / SLOT_MIN
+        groups = sorted(m3u.groups(state.channels), key=str.lower)
+        srcs = sorted(m3u.sources(state.channels), key=str.lower)
         return render_template(
             "epg_grid.html",
             rows=rows,
             slot_labels=slot_labels,
             slot_count=SLOT_COUNT,
             now_slots=now_slots,
+            groups=groups,
+            sources=srcs,
         )
 
     @app.get("/<cid>/epg")

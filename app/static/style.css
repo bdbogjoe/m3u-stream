@@ -246,9 +246,10 @@ body.show-offline .tile.offline.hidden { display: none; }
   background: #1a1a1a;
   border-bottom: 1px solid #2a2a2a;
 }
-.epg-grid-header h1 { margin: 0.4rem 0 0; font-size: 1.2rem; }
+.epg-grid-header h1 { margin: 0.4rem 0 0.5rem; font-size: 1.2rem; }
 .epg-grid-header .back { color: #9bd; text-decoration: none; font-size: 0.9rem; }
 .epg-grid-header .back:hover { text-decoration: underline; }
+#epg-count { color: #aaa; font-size: 0.9rem; }
 .epg-grid-wrap {
   padding: 1rem;
   overflow-x: auto;
