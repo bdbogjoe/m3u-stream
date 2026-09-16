@@ -65,7 +65,8 @@ class EPG:
     """
 
     def __init__(self, urls: str | list[str], ttl_seconds: int = 6 * 3600,
-                 wanted: Optional[Callable[[], set[str]]] = None):
+                 wanted: Optional[Callable[[], set[str]]] = None,
+                 aliases_path: str = ""):
         if isinstance(urls, str):
             urls = [u.strip() for u in urls.split(",") if u.strip()]
         self.urls = list(urls)
@@ -74,6 +75,9 @@ class EPG:
         # Channels matching none of them are dropped, which is most of a
         # nationwide XMLTV feed. None disables filtering entirely.
         self._wanted = wanted
+        # Re-read at every refresh so the file can be edited without a restart.
+        self._aliases_path = aliases_path
+        self._aliases: dict[str, str] = {}
         self._programmes: dict[str, list[Programme]] = {}
         self._name_to_id: dict[str, str] = {}
         # The merged XMLTV is written to disk, not held in memory: it weighs
@@ -96,6 +100,41 @@ class EPG:
                 continue
             time.sleep(self.ttl)
 
+    def _load_aliases(self) -> dict[str, str]:
+        """Read the alias file: one `M3U name = EPG name or id` per line.
+
+        Feeds and playlists rarely name a channel the same way — "BeIn FR 1 HD"
+        against "beIN SPORTS 1" — and no normalisation rule separates those
+        safely from genuinely distinct channels like "Canal+" and "Canal+ Sport".
+        Explicit aliases keep the ambiguous cases under the user's control.
+        """
+        path = self._aliases_path
+        if not path:
+            return {}
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                raw = fh.read()
+        except FileNotFoundError:
+            return {}
+        except OSError as e:
+            log.warning("EPG aliases: cannot read %s: %s", path, e)
+            return {}
+        out: dict[str, str] = {}
+        for lineno, line in enumerate(raw.splitlines(), 1):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            left, sep, right = line.partition("=")
+            left, right = left.strip(), right.strip()
+            if not sep or not left or not right:
+                log.warning("EPG aliases: ignoring line %d (expected 'name = target'): %s",
+                            lineno, line)
+                continue
+            out[_norm(left)] = right
+        if out:
+            log.info("EPG aliases: %d entries from %s", len(out), path)
+        return out
+
     def _fetch_one(self, url: str) -> bytes:
         log.info("fetching EPG from %s", url)
         req = urllib.request.Request(url, headers={"User-Agent": "m3u-stream-epg/1.0"})
@@ -114,7 +153,14 @@ class EPG:
         seen: set[tuple[str, datetime]] = set()
         now = datetime.now(timezone.utc)
         ok_urls = 0
+        aliases = self._load_aliases()
         wanted = self._wanted() if self._wanted is not None else None
+        if wanted:
+            # Alias targets must survive the filter, or the alias resolves to a
+            # channel we just dropped.
+            for target in aliases.values():
+                wanted.add(_norm(target))
+                wanted.add(_norm(_strip_suffix(target)))
         if not wanted:
             # No channels loaded yet (or no filter): keep everything rather
             # than silently serving an empty guide.
@@ -222,6 +268,7 @@ class EPG:
         with self._lock:
             self._programmes = progs
             self._name_to_id = names
+            self._aliases = aliases
             self._xml_ready = True
         log.info("EPG loaded: %d channels with programmes, %d display-names from %d/%d "
                  "source(s); channels kept %d, dropped %d; xml %.1f MB on disk",
@@ -328,6 +375,19 @@ class EPG:
         if not channel_name:
             return None
         with self._lock:
+            # An explicit alias wins over name matching.
+            target = self._aliases.get(_norm(channel_name))
+            if target is None:
+                target = self._aliases.get(_norm(_strip_suffix(channel_name)))
+            if target is not None:
+                if target in self._programmes:
+                    return target          # the alias names an XMLTV id directly
+                cid = self._name_to_id.get(_norm(target))
+                if cid is not None:
+                    return cid
+                cid = self._name_to_id.get(_norm(_strip_suffix(target)))
+                if cid is not None:
+                    return cid
             cid = self._name_to_id.get(_norm(channel_name))
             if cid is not None:
                 return cid

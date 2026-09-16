@@ -161,9 +161,14 @@ def create_app() -> Flask:
                 out.add(_norm_text(_strip_suffix_text(value)))
         return out
 
-    epg: EPG | None = EPG(epg_urls, wanted=_epg_wanted_names) if epg_urls else None
+    epg_aliases_path = os.environ.get("EPG_ALIASES", "")
+    epg: EPG | None = (EPG(epg_urls, wanted=_epg_wanted_names,
+                           aliases_path=epg_aliases_path)
+                       if epg_urls else None)
     if epg:
         log.info("EPG_URL       = %s", ", ".join(epg_urls))
+        if epg_aliases_path:
+            log.info("EPG_ALIASES   = %s", epg_aliases_path)
 
     state.prober.start(state.channels)
     probe_interval = int(os.environ.get("PROBE_INTERVAL", "600"))
