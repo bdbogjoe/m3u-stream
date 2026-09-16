@@ -20,10 +20,10 @@ if __name__ == "__main__" and __package__ in (None, ""):
 
 import requests
 import urllib3
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request, send_file
 
 from . import dlna, m3u
-from .epg import EPG, _norm as _norm_text
+from .epg import EPG, _norm as _norm_text, _strip_suffix as _strip_suffix_text
 from .state import AppState
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -144,7 +144,24 @@ def create_app() -> Flask:
         sys.exit(2)
 
     epg_urls = [u.strip() for u in (os.environ.get("EPG_URL") or "").split(",") if u.strip()]
-    epg: EPG | None = EPG(epg_urls) if epg_urls else None
+
+    def _epg_wanted_names() -> set[str]:
+        """Normalised names the EPG should keep — everything else is dropped.
+
+        A nationwide XMLTV feed carries an order of magnitude more channels
+        than we serve, and each kept programme is a live object for the whole
+        process lifetime.
+        """
+        out: set[str] = set()
+        for c in state.channels:
+            for value in (c.name, c.tvg_id):
+                if not value:
+                    continue
+                out.add(_norm_text(value))
+                out.add(_norm_text(_strip_suffix_text(value)))
+        return out
+
+    epg: EPG | None = EPG(epg_urls, wanted=_epg_wanted_names) if epg_urls else None
     if epg:
         log.info("EPG_URL       = %s", ", ".join(epg_urls))
 
@@ -540,12 +557,13 @@ def create_app() -> Flask:
         if not epg:
             return Response("EPG not configured (set EPG_URL)\n",
                             status=404, content_type="text/plain; charset=utf-8")
-        data = epg.raw_xml()
-        if not data:
+        path = epg.raw_xml_path()
+        if not path:
             return Response("EPG not loaded yet, try again in a few seconds\n",
                             status=503, content_type="text/plain; charset=utf-8",
                             headers={"Retry-After": "5"})
-        resp = Response(data, content_type="application/xml; charset=utf-8")
+        # Streamed from disk: this file is well over 100 MB.
+        resp = send_file(path, mimetype="application/xml", conditional=True)
         resp.headers["Cache-Control"] = "public, max-age=900"
         return resp
 

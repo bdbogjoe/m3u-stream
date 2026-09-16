@@ -1,7 +1,9 @@
 import gzip
 import io
 import logging
+import os
 import re
+import tempfile
 import threading
 import time
 import unicodedata
@@ -9,6 +11,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Callable, Optional
 
 log = logging.getLogger("m3u-stream.epg")
 
@@ -61,14 +64,22 @@ class EPG:
     in channels the earlier ones don't cover.
     """
 
-    def __init__(self, urls: str | list[str], ttl_seconds: int = 6 * 3600):
+    def __init__(self, urls: str | list[str], ttl_seconds: int = 6 * 3600,
+                 wanted: Optional[Callable[[], set[str]]] = None):
         if isinstance(urls, str):
             urls = [u.strip() for u in urls.split(",") if u.strip()]
         self.urls = list(urls)
         self.ttl = ttl_seconds
+        # Called at each refresh to get the normalised names we actually serve.
+        # Channels matching none of them are dropped, which is most of a
+        # nationwide XMLTV feed. None disables filtering entirely.
+        self._wanted = wanted
         self._programmes: dict[str, list[Programme]] = {}
         self._name_to_id: dict[str, str] = {}
-        self._raw_xml: bytes = b""
+        # The merged XMLTV is written to disk, not held in memory: it weighs
+        # well over 100 MB and is only ever streamed back out verbatim.
+        self._xml_path = os.path.join(tempfile.gettempdir(), "m3u-stream-epg.xml")
+        self._xml_ready = False
         self._lock = threading.Lock()
         self._loaded = threading.Event()
         threading.Thread(target=self._refresher, daemon=True).start()
@@ -97,78 +108,124 @@ class EPG:
     def _refresh(self) -> None:
         progs: dict[str, list[Programme]] = {}
         names: dict[str, str] = {}
-        merged_root = ET.Element("tv")
         # Some XMLTV feeds (notably epgshare01's FR1) publish each programme
         # twice — once with UTC timestamps, once with the local-tz form. Both
         # parse to the same datetime, so we de-dup on (channel, start instant).
         seen: set[tuple[str, datetime]] = set()
         now = datetime.now(timezone.utc)
         ok_urls = 0
-        for url in self.urls:
-            try:
-                data = self._fetch_one(url)
-            except Exception as e:
-                log.warning("EPG fetch failed for %s: %s", url, e)
-                continue
-            ok_urls += 1
-            for _, elem in ET.iterparse(io.BytesIO(data), events=("end",)):
-                if elem.tag == "programme":
-                    start = _parse_time(elem.get("start", ""))
-                    stop = _parse_time(elem.get("stop", ""))
-                    cid = elem.get("channel", "")
-                    # Only keep programmes that could still be "current" or
-                    # "upcoming" — anything that already ended is dead weight.
-                    if start and stop and cid and stop > now:
-                        key = (cid, start)
-                        if key not in seen:
-                            seen.add(key)
-                            title = (elem.findtext("title") or "").strip()
-                            if title:
-                                # Pick the best category: prefer lang="fr",
-                                # else first non-empty <category>.
-                                category = ""
-                                for cat in elem.findall("category"):
-                                    text = (cat.text or "").strip()
-                                    if not text:
-                                        continue
-                                    if cat.get("lang") == "fr":
-                                        category = text
+        wanted = self._wanted() if self._wanted is not None else None
+        if not wanted:
+            # No channels loaded yet (or no filter): keep everything rather
+            # than silently serving an empty guide.
+            wanted = None
+        keep_ids: set[str] = set()
+        kept = dropped = 0
+
+        tmp_path = self._xml_path + ".tmp"
+        with open(tmp_path, "wb") as out:
+            out.write(b'<?xml version="1.0" encoding="utf-8"?>\n<tv>\n')
+            for url in self.urls:
+                try:
+                    data = self._fetch_one(url)
+                except Exception as e:
+                    log.warning("EPG fetch failed for %s: %s", url, e)
+                    continue
+                ok_urls += 1
+                filtering = wanted is not None
+                channels_seen = 0
+                context = ET.iterparse(io.BytesIO(data), events=("start", "end"))
+                _, root = next(context)
+                for event, elem in context:
+                    if event != "end":
+                        continue
+                    if elem.tag == "programme":
+                        if filtering and channels_seen == 0:
+                            # XMLTV's DTD puts <channel> before <programme>. A
+                            # feed that doesn't leaves us no way to know which
+                            # ids to keep, so don't filter it at all.
+                            log.warning("EPG %s lists programmes before channels; "
+                                        "keeping every channel from this source", url)
+                            filtering = False
+                        start = _parse_time(elem.get("start", ""))
+                        stop = _parse_time(elem.get("stop", ""))
+                        cid = elem.get("channel", "")
+                        # Only keep programmes that could still be "current" or
+                        # "upcoming" — anything that already ended is dead weight.
+                        if (start and stop and cid and stop > now
+                                and (not filtering or cid in keep_ids)):
+                            key = (cid, start)
+                            if key not in seen:
+                                seen.add(key)
+                                title = (elem.findtext("title") or "").strip()
+                                if title:
+                                    # Pick the best category: prefer lang="fr",
+                                    # else first non-empty <category>.
+                                    category = ""
+                                    for cat in elem.findall("category"):
+                                        text = (cat.text or "").strip()
+                                        if not text:
+                                            continue
+                                        if cat.get("lang") == "fr":
+                                            category = text
+                                            break
+                                        if not category:
+                                            category = text
+                                    progs.setdefault(cid, []).append(
+                                        Programme(start, stop, title, category))
+                                    out.write(ET.tostring(elem, encoding="utf-8"))
+                    elif elem.tag == "channel":
+                        channels_seen += 1
+                        cid = elem.get("id", "")
+                        if cid:
+                            texts = [(d.text or "").strip() for d in elem.findall("display-name")]
+                            texts = [x for x in texts if x]
+                            keep = not filtering
+                            if filtering:
+                                for text in texts + [cid]:
+                                    if (_norm(text) in wanted
+                                            or _norm(_strip_suffix(text)) in wanted):
+                                        keep = True
                                         break
-                                    if not category:
-                                        category = text
-                                progs.setdefault(cid, []).append(
-                                    Programme(start, stop, title, category))
-                            merged_root.append(elem)
-                            continue  # don't clear — element is now owned by merged_root
+                            if keep:
+                                kept += 1
+                                keep_ids.add(cid)
+                                for text in texts:
+                                    # First feed/name wins on collision; XMLTV
+                                    # typically lists more "canonical" names first.
+                                    names.setdefault(_norm(text), cid)
+                                    names.setdefault(_norm(_strip_suffix(text)), cid)
+                                # Also map the id itself in case the M3U name matches it.
+                                names.setdefault(_norm(cid), cid)
+                                names.setdefault(_norm(_strip_suffix(cid)), cid)
+                                out.write(ET.tostring(elem, encoding="utf-8"))
+                            else:
+                                dropped += 1
+                    else:
+                        continue
+                    # Drop the element and detach it from the root, so peak
+                    # memory stays flat instead of growing with the feed.
                     elem.clear()
-                elif elem.tag == "channel":
-                    cid = elem.get("id", "")
-                    if cid:
-                        for d in elem.findall("display-name"):
-                            text = (d.text or "").strip()
-                            if not text:
-                                continue
-                            # First feed/name wins on collision; XMLTV typically
-                            # lists more "canonical" names earlier in the file.
-                            names.setdefault(_norm(text), cid)
-                            names.setdefault(_norm(_strip_suffix(text)), cid)
-                        # Also map the id itself in case the M3U name matches it.
-                        names.setdefault(_norm(cid), cid)
-                        names.setdefault(_norm(_strip_suffix(cid)), cid)
-                        merged_root.append(elem)
-                        continue  # don't clear — element is now owned by merged_root
-                    elem.clear()
+                    root.clear()
+            out.write(b"</tv>\n")
+
         if ok_urls == 0:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
             raise RuntimeError("no EPG source could be fetched")
         for plist in progs.values():
             plist.sort(key=lambda p: p.start)
-        raw_xml = ET.tostring(merged_root, encoding="utf-8", xml_declaration=True)
+        os.replace(tmp_path, self._xml_path)
+        size_mb = os.path.getsize(self._xml_path) / (1024 * 1024)
         with self._lock:
             self._programmes = progs
             self._name_to_id = names
-            self._raw_xml = raw_xml
-        log.info("EPG loaded: %d channels with programmes, %d display-names from %d/%d source(s)",
-                 len(progs), len(names), ok_urls, len(self.urls))
+            self._xml_ready = True
+        log.info("EPG loaded: %d channels with programmes, %d display-names from %d/%d "
+                 "source(s); channels kept %d, dropped %d; xml %.1f MB on disk",
+                 len(progs), len(names), ok_urls, len(self.urls), kept, dropped, size_mb)
 
     def _current_for_id(self, cid: str) -> Programme | None:
         now = datetime.now(timezone.utc)
@@ -276,7 +333,7 @@ class EPG:
                 return cid
             return self._name_to_id.get(_norm(_strip_suffix(channel_name)))
 
-    def raw_xml(self) -> bytes:
-        """Return the cached XMLTV bytes (uncompressed) for serving as-is."""
+    def raw_xml_path(self) -> str | None:
+        """Path of the merged XMLTV on disk, or None if not built yet."""
         with self._lock:
-            return self._raw_xml
+            return self._xml_path if self._xml_ready else None
