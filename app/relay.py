@@ -110,6 +110,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 ip = None
             if ip is not None and any(ip in net for net in relay.auth_trusted_nets):
                 return True
+        # Media players can't answer a Basic challenge per channel, so a
+        # shared token carried in the URL is accepted as an equivalent.
+        if self._token_ok(relay):
+            return True
         header = self.headers.get("Authorization", "")
         if not header.startswith("Basic "):
             return False
@@ -120,6 +124,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         u, _, p = decoded.partition(":")
         return (secrets.compare_digest(u, relay.auth_user)
                 and secrets.compare_digest(p, relay.auth_pass))
+
+    def _token_ok(self, relay: "Relay") -> bool:
+        if not relay.stream_token:
+            return False
+        query = urllib.parse.urlparse(self.path).query
+        return any(secrets.compare_digest(t, relay.stream_token)
+                   for t in urllib.parse.parse_qs(query).get("t", []))
 
     def _send_auth_required(self) -> None:
         body = b"auth required\n"
@@ -349,7 +360,7 @@ class Relay:
 
     def __init__(self, port: int, web_url: str = "", web_public_url: str = "",
                  auth_user: str = "", auth_pass: str = "",
-                 auth_trusted_nets=None,
+                 auth_trusted_nets=None, stream_token: str = "",
                  resolve_url: Optional[Callable[[str], Optional[str]]] = None):
         self.port = port
         self.web_url = web_url or "the m3u-stream web UI"
@@ -358,6 +369,7 @@ class Relay:
         self.auth_pass = auth_pass
         self.auth_enabled = bool(auth_user and auth_pass)
         self.auth_trusted_nets = list(auth_trusted_nets or [])
+        self.stream_token = stream_token
         self.resolve_url = resolve_url or (lambda _id: None)
 
         self._base_hls_dir = Path(tempfile.mkdtemp(prefix="m3u-stream-hls-"))

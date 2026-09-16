@@ -11,7 +11,7 @@ import subprocess
 import sys
 import threading
 import time
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 if __name__ == "__main__" and __package__ in (None, ""):
     import pathlib
@@ -101,6 +101,7 @@ def create_app() -> Flask:
     auth_user = os.environ.get("AUTH_USER", "")
     auth_pass = os.environ.get("AUTH_PASS", "")
     auth_enabled = bool(auth_user and auth_pass)
+    stream_token = os.environ.get("STREAM_TOKEN", "")
     default_cidrs = "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,::1/128,fc00::/7"
     cidrs_str = os.environ.get("AUTH_TRUSTED_CIDRS", default_cidrs)
     trusted_nets = []
@@ -115,6 +116,7 @@ def create_app() -> Flask:
     if auth_enabled:
         log.info("basic auth   = enabled (proxied requests only)")
         log.info("auth bypass  = %s", ",".join(str(n) for n in trusted_nets))
+        log.info("stream token = %s", "set (?t= accepted)" if stream_token else "unset")
     log.info("host_ip       = %s", host_ip)
     log.info("tv_ip         = %s  (cast %s)",
              tv_ip or "-", "enabled" if tv_ip else "disabled")
@@ -132,7 +134,7 @@ def create_app() -> Flask:
 
     state = AppState(relay_port, web_url=web_lan_url, web_public_url=web_public_url,
                      auth_user=auth_user, auth_pass=auth_pass,
-                     auth_trusted_nets=trusted_nets)
+                     auth_trusted_nets=trusted_nets, stream_token=stream_token)
     try:
         state.channels = _load_all(sources)
         log.info("loaded %d channels total from %d source(s)",
@@ -228,6 +230,10 @@ def create_app() -> Flask:
         client_ip = xff or (request.remote_addr or "")
         if client_ip and _client_ip_trusted(client_ip):
             return None
+        if stream_token:
+            for t in request.args.getlist("t"):
+                if secrets.compare_digest(t, stream_token):
+                    return None
         if _check_basic_auth(request.headers.get("Authorization")):
             return None
         return Response(
@@ -376,10 +382,13 @@ def create_app() -> Flask:
         probe = state.prober.status()
         chans = [c for c in chans if probe.get(c.id) is not False]
         base = _public_base()
+        # External players get one shared token in every URL: they cannot
+        # answer a Basic challenge per channel.
+        tok = f"?t={quote(stream_token)}" if stream_token else ""
         q = lambda v: v.replace('"', "'")
         header = "#EXTM3U"
         if epg:
-            header += f' x-tvg-url="{_public_web_base()}/epg.xml"'
+            header += f' x-tvg-url="{_public_web_base()}/epg.xml{tok}"'
         lines = [header]
         for c in chans:
             attrs = []
@@ -396,7 +405,7 @@ def create_app() -> Flask:
             if c.group:
                 attrs.append(f'group-title="{q(c.group)}"')
             lines.append(f"#EXTINF:-1 {' '.join(attrs)},{c.name}")
-            lines.append(f"{base}/{_enc(c.id)}/stream.ts")
+            lines.append(f"{base}/{_enc(c.id)}/stream.ts{tok}")
         body = "\n".join(lines) + "\n"
         return Response(body, content_type="audio/x-mpegurl; charset=utf-8")
 

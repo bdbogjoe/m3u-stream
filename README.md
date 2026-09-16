@@ -58,6 +58,7 @@ In bridge mode you **must** set `HOST_IP` explicitly to the host's LAN IP — th
 | `TV_IP`      | no       | —                | If unset, the *Cast to TV* button is hidden and DLNA discovery is skipped. |
 | `WEB_PORT`   | no       | `8080`           | Web UI port.                                                             |
 | `RELAY_PORT` | no       | `8888`           | HTTP relay port (`/stream.ts`, `/stream.mp4`).                           |
+| `STREAM_TOKEN` | no   | —                | Shared secret accepted as `?t=<token>` on any URL, alongside Basic auth. Injected into every stream URL of the generated playlist, so external players never face a 401 they cannot answer. Generate with `openssl rand -hex 24`. |
 | `HOST_IP`    | no       | auto             | Auto-detected via `ip route get $TV_IP` (or `1.1.1.1` if no TV). Required in bridge mode. |
 | `RELAY_BASE_URL` | no   | —                | Public base URL for the relay (e.g. `https://stream.example.com`). Used only when the request reaches the app through a reverse proxy (any `X-Forwarded-*` header present). DLNA cast always uses `http://$HOST_IP:$RELAY_PORT`. |
 | `WEB_BASE_URL`   | no   | —                | Public base URL for the web UI (e.g. `https://m3u.example.com`). Used in the relay's "no stream running" 503 page so the link points at the public UI when reached via the proxy. |

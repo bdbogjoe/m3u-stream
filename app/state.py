@@ -8,7 +8,8 @@ from .relay import Relay
 
 class AppState:
     def __init__(self, relay_port: int, web_url: str = "", web_public_url: str = "",
-                 auth_user: str = "", auth_pass: str = "", auth_trusted_nets=None):
+                 auth_user: str = "", auth_pass: str = "", auth_trusted_nets=None,
+                 stream_token: str = ""):
         self.lock = threading.Lock()
         self.channels: list[Channel] = []
         self.current: Optional[Channel] = None
@@ -22,6 +23,7 @@ class AppState:
             web_url=web_url, web_public_url=web_public_url,
             auth_user=auth_user, auth_pass=auth_pass,
             auth_trusted_nets=auth_trusted_nets or [],
+            stream_token=stream_token,
             resolve_url=self._resolve_url,
         )
 
