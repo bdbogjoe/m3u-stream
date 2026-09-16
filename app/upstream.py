@@ -28,10 +28,13 @@ RECONNECT_MAX_ATTEMPTS = 12
 # still answers 200. Bailing out lets the consumer (ffmpeg) wind down so
 # downstream client-disconnect handling can run.
 EMPTY_BODY_GIVE_UP = 5
-# The upstream drops the connection about every 28s. Opening the next one
-# before that happens means its replayed head is already downloaded when the
-# current one goes, so the consumer never runs dry.
-OVERLAP_AFTER = 18.0
+# Open the next connection before the current one drops, so its replayed head
+# is already downloaded at handover and the consumer never runs dry.
+# Measured on the live upstream: connection lifetime is 1s min, 6s median,
+# 27s max -- so this has to be small. At 3s roughly 3 cuts in 4 are covered;
+# 18s covered only 1 in 4. The cost is two open connections to the provider
+# for part of each cycle.
+OVERLAP_AFTER = 3.0
 OVERLAP_BUFFER_MAX = 16 << 20
 
 
