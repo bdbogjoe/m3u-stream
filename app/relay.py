@@ -73,7 +73,10 @@ def _ffmpeg_hls_cmd(hls_dir: Path) -> list[str]:
         "ffmpeg", "-loglevel", "warning", "-nostdin",
         "-i", "pipe:0",
         "-c:v", "copy",
-        "-c:a", "aac", "-b:a", "128k", "-ac", "2",
+        # Measured: every sampled channel is already AAC, and re-encoding it
+        # costs ~6x the CPU for an identical result. There is no fallback --
+        # a channel shipping MP2 or AC3 would need this back to "aac".
+        "-c:a", "copy",
         "-f", "hls",
         "-hls_time", "2",
         "-hls_list_size", "6",

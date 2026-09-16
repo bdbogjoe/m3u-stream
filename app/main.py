@@ -430,6 +430,11 @@ def create_app() -> Flask:
         probe = state.prober.status()
         chans = [c for c in chans if probe.get(c.id) is not False]
         base = _public_base()
+        # ?fmt=hls serves stream.m3u8 instead of stream.ts. HLS shares one
+        # ffmpeg and one upstream connection between every viewer of a
+        # channel, and buffers segments, so it rides out the upstream's
+        # periodic disconnects; the cost is a few seconds behind live.
+        ext = "m3u8" if request.args.get("fmt", "").lower() == "hls" else "ts"
         # External players get one shared token in every URL: they cannot
         # answer a Basic challenge per channel.
         tok = _tok_qs()
@@ -453,7 +458,7 @@ def create_app() -> Flask:
             if c.group:
                 attrs.append(f'group-title="{q(c.group)}"')
             lines.append(f"#EXTINF:-1 {' '.join(attrs)},{c.name}")
-            lines.append(f"{base}/{_enc(c.id)}/stream.ts{tok}")
+            lines.append(f"{base}/{_enc(c.id)}/stream.{ext}{tok}")
         body = "\n".join(lines) + "\n"
         return Response(body, content_type="audio/x-mpegurl; charset=utf-8")
 
