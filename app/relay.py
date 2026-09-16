@@ -51,6 +51,23 @@ def _ffmpeg_cmd(output: str) -> list[str]:
     return base + ["-c", "copy", "-f", "mpegts", "pipe:1"]
 
 
+def _reap(proc) -> None:
+    """Kill a child and collect its exit status.
+
+    Without the wait() the killed process stays <defunct> until subprocess
+    happens to reap it when the next Popen is created — bounded, but it means
+    the process table depends on when the next viewer shows up.
+    """
+    try:
+        proc.kill()
+    except Exception:
+        pass
+    try:
+        proc.wait(timeout=5)
+    except Exception:
+        pass
+
+
 def _ffmpeg_hls_cmd(hls_dir: Path) -> list[str]:
     return [
         "ffmpeg", "-loglevel", "warning", "-nostdin",
@@ -314,7 +331,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             try: self.wfile.write(body)
             except Exception: pass
             reader.close()
-            proc.kill()
+            _reap(proc)
             return
 
         self.send_response(200)
@@ -334,7 +351,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             pass
         finally:
             reader.close()
-            proc.kill()
+            _reap(proc)
 
     def log_message(self, *args):
         pass
@@ -509,7 +526,7 @@ class Relay:
             try:
                 ctx.hls_proc.terminate()
                 try: ctx.hls_proc.wait(timeout=2)
-                except subprocess.TimeoutExpired: ctx.hls_proc.kill()
+                except subprocess.TimeoutExpired: _reap(ctx.hls_proc)
             except Exception:
                 pass
         ctx.hls_proc = None
