@@ -73,10 +73,11 @@ def _ffmpeg_hls_cmd(hls_dir: Path) -> list[str]:
         "ffmpeg", "-loglevel", "warning", "-nostdin",
         "-i", "pipe:0",
         "-c:v", "copy",
-        # Measured: every sampled channel is already AAC, and re-encoding it
-        # costs ~6x the CPU for an identical result. There is no fallback --
-        # a channel shipping MP2 or AC3 would need this back to "aac".
-        "-c:a", "copy",
+        # Re-encoded on purpose. Copying the (already AAC) audio saves ~6x
+        # the CPU, but ffmpeg cuts segments on video keyframes and AAC frames
+        # don't land on those boundaries, so players that concatenate without
+        # re-syncing on PTS drift out of lip sync. Not worth 1.7% of a core.
+        "-c:a", "aac", "-b:a", "128k", "-ac", "2",
         "-f", "hls",
         "-hls_time", "2",
         "-hls_list_size", "6",
