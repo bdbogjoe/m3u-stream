@@ -51,6 +51,26 @@ def _ffmpeg_cmd(output: str) -> list[str]:
     return base + ["-c", "copy", "-f", "mpegts", "pipe:1"]
 
 
+HLS_START_OFFSET = 20.0   # seconds behind live a player should start
+
+
+def _with_start_offset(playlist: bytes) -> bytes:
+    """Ask the player to start behind live rather than at the edge.
+
+    The upstream cuts every few seconds and replays what it already sent, so
+    the pipeline stalls briefly and a player sitting at the live edge runs out
+    of segments — the stutter viewers see. Starting further back keeps a
+    reserve in hand. Players that don't know EXT-X-START ignore it.
+    """
+    if b"#EXT-X-START" in playlist:
+        return playlist
+    tag = f"#EXT-X-START:TIME-OFFSET=-{HLS_START_OFFSET:g},PRECISE=YES\n".encode()
+    marker = b"#EXTM3U\n"
+    if not playlist.startswith(marker):
+        return playlist
+    return marker + tag + playlist[len(marker):]
+
+
 def _reap(proc) -> None:
     """Kill a child and collect its exit status.
 
@@ -80,11 +100,12 @@ def _ffmpeg_hls_cmd(hls_dir: Path) -> list[str]:
         "-c:a", "aac", "-b:a", "128k", "-ac", "2",
         "-f", "hls",
         "-hls_time", "2",
-        # The upstream drops the connection about every 28s and replays up to
-        # 17s on reconnect, which tsdedup discards -- so nothing leaves the
-        # pipeline for a moment and the player runs dry. A deeper window gives
-        # it enough segments in hand to coast through that.
-        "-hls_list_size", "12",
+        # The upstream cuts every few seconds and replays what it already sent,
+        # which tsdedup discards -- so the pipeline stalls and a player at the
+        # live edge runs dry. Players are told to start HLS_START_OFFSET behind
+        # live; the window has to be comfortably deeper than that or segments
+        # get deleted from under them.
+        "-hls_list_size", "20",
         "-hls_flags", "delete_segments+append_list+independent_segments+omit_endlist",
         "-hls_segment_type", "mpegts",
         "-hls_segment_filename", str(hls_dir / "seg%05d.ts"),
@@ -274,6 +295,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         except OSError:
             self.send_error(404)
             return
+        if rel == "stream.m3u8":
+            data = _with_start_offset(data)
         self.send_response(200)
         self.send_header("Content-Type", self._content_type_for(rel))
         self.send_header("Content-Length", str(len(data)))

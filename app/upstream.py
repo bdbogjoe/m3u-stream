@@ -31,10 +31,11 @@ EMPTY_BODY_GIVE_UP = 5
 # Open the next connection before the current one drops, so its replayed head
 # is already downloaded at handover and the consumer never runs dry.
 # Measured on the live upstream: connection lifetime is 1s min, 6s median,
-# 27s max -- so this has to be small. At 3s roughly 3 cuts in 4 are covered;
-# 18s covered only 1 in 4. The cost is two open connections to the provider
-# for part of each cycle.
-OVERLAP_AFTER = 3.0
+# 27s max. 18s covered 1 cut in 4, 3s covered 41% -- some connections die
+# before the timer even fires. 0 keeps a spare connection open at all times,
+# which is the only way to cover the short ones. Costs two connections to the
+# provider per channel, shared by every viewer since HLS muxes them.
+OVERLAP_AFTER = 0.0
 OVERLAP_BUFFER_MAX = 16 << 20
 
 
