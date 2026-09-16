@@ -80,7 +80,11 @@ def _ffmpeg_hls_cmd(hls_dir: Path) -> list[str]:
         "-c:a", "aac", "-b:a", "128k", "-ac", "2",
         "-f", "hls",
         "-hls_time", "2",
-        "-hls_list_size", "6",
+        # The upstream drops the connection about every 28s and replays up to
+        # 17s on reconnect, which tsdedup discards -- so nothing leaves the
+        # pipeline for a moment and the player runs dry. A deeper window gives
+        # it enough segments in hand to coast through that.
+        "-hls_list_size", "12",
         "-hls_flags", "delete_segments+append_list+independent_segments+omit_endlist",
         "-hls_segment_type", "mpegts",
         "-hls_segment_filename", str(hls_dir / "seg%05d.ts"),
