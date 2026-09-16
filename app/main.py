@@ -20,13 +20,15 @@ if __name__ == "__main__" and __package__ in (None, ""):
 
 import requests
 import urllib3
-from flask import Flask, Response, jsonify, render_template, request, send_file
+from flask import Flask, Response, g, jsonify, render_template, request, send_file
 
 from . import dlna, m3u
 from .epg import EPG, _norm as _norm_text, _strip_suffix as _strip_suffix_text
 from .state import AppState
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+_TOKEN_COOKIE = "m3u_token"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("m3u-stream")
@@ -255,7 +257,13 @@ def create_app() -> Flask:
         if stream_token:
             for t in request.args.getlist("t"):
                 if secrets.compare_digest(t, stream_token):
+                    # Remember it for the browser: a page pulls stylesheets,
+                    # logos and links that cannot all carry the token.
+                    g.issue_token_cookie = True
                     return None
+            cookie = request.cookies.get(_TOKEN_COOKIE)
+            if cookie and secrets.compare_digest(cookie, stream_token):
+                return None
         if _check_basic_auth(request.headers.get("Authorization")):
             return None
         return Response(
@@ -263,6 +271,16 @@ def create_app() -> Flask:
             status=401,
             headers={"WWW-Authenticate": 'Basic realm="m3u-stream"'},
         )
+
+    @app.after_request
+    def _issue_token_cookie(resp):
+        if getattr(g, "issue_token_cookie", False):
+            https = (request.headers.get("X-Forwarded-Proto") == "https"
+                     or request.is_secure)
+            resp.set_cookie(_TOKEN_COOKIE, stream_token,
+                            max_age=30 * 24 * 3600, httponly=True,
+                            secure=https, samesite="Lax")
+        return resp
 
     def _ensure_control_url() -> str:
         if not tv_ip:
@@ -290,6 +308,14 @@ def create_app() -> Flask:
     def _enc(cid: str) -> str:
         from urllib.parse import quote
         return quote(cid, safe="")
+
+    def _tok_qs() -> str:
+        """`?t=<token>` for URLs the browser follows to another host.
+
+        The auth cookie only covers this origin; the relay lives on its own
+        hostname, so its URLs still have to carry the token themselves.
+        """
+        return f"?t={quote(stream_token)}" if stream_token else ""
 
     def _cast_stream_url(channel) -> str:
         # LAN-direct: the TV won't resolve an external/proxied hostname.
@@ -406,7 +432,7 @@ def create_app() -> Flask:
         base = _public_base()
         # External players get one shared token in every URL: they cannot
         # answer a Basic challenge per channel.
-        tok = f"?t={quote(stream_token)}" if stream_token else ""
+        tok = _tok_qs()
         q = lambda v: v.replace('"', "'")
         header = "#EXTM3U"
         if epg:
@@ -448,8 +474,8 @@ def create_app() -> Flask:
             channel=channel,
             current_programme=current,
             schedule=schedule,
-            mp4_url=f"{base}/{cid_enc}/stream.mp4",
-            hls_url=f"{base}/{cid_enc}/stream.m3u8",
+            mp4_url=f"{base}/{cid_enc}/stream.mp4{_tok_qs()}",
+            hls_url=f"{base}/{cid_enc}/stream.m3u8{_tok_qs()}",
         )
 
     @app.get("/epg")
