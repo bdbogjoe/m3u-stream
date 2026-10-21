@@ -15,6 +15,20 @@ _SCHEME = re.compile(r'https?://')
 # round-trip per render.
 _BLOCKED_LOGO_HOSTS = ("free.fr",)
 
+# On-demand files (films) rather than live channels, told apart by the URL's
+# extension. They are finite and seekable, so players fetch them directly
+# instead of through the live relay, and the prober leaves them alone.
+_VOD_MIME = {
+    ".mp4": "video/mp4",
+    ".m4v": "video/mp4",
+    ".mkv": "video/x-matroska",
+    ".avi": "video/x-msvideo",
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
+    ".mpg": "video/mpeg",
+    ".mpeg": "video/mpeg",
+}
+
 
 def _clean_url(url: str) -> str:
     """Some M3U feeds concatenate a base URL without a separating slash,
@@ -47,6 +61,17 @@ class Channel:
     logo: str = ""
     source: str = ""
     tvg_id: str = ""
+
+    @property
+    def vod_mime(self) -> str | None:
+        """MIME type of an on-demand file, None for a live channel."""
+        path = urlparse(self.url).path.lower()
+        ext = path[path.rfind("."):] if "." in path.rsplit("/", 1)[-1] else ""
+        return _VOD_MIME.get(ext)
+
+    @property
+    def vod(self) -> bool:
+        return self.vod_mime is not None
 
 
 def parse(text: str) -> list[Channel]:

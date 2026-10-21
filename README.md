@@ -78,6 +78,10 @@ M3U_URL=https://example.com/france.m3u,https://example.com/sport.m3u
 M3U_URL=france=https://a/x.m3u,sport=https://b/y.m3u
 ```
 
+### Films (VOD)
+
+Entries whose URL ends in a video file extension (`.mp4`, `.mkv`, `.mpg`, `.avi`, …) are treated as on-demand files rather than live channels: they are never probed, and the browser player, the TV cast and the generated playlists all use the original URL directly instead of going through the relay, so playback is seekable.
+
 ## Running without Docker
 
 ```sh

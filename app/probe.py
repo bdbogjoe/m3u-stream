@@ -67,6 +67,10 @@ class Prober:
         return True
 
     def _run(self, channels: list[Channel]) -> None:
+        # A film library runs to thousands of entries: opening each one every
+        # cycle would hammer the provider for no use, as files don't go
+        # offline the way live channels do. They stay "not probed".
+        channels = [c for c in channels if not c.vod]
         log.info("probing %d channels", len(channels))
         results: dict[str, bool] = {}
         with ThreadPoolExecutor(max_workers=self.max_workers) as pool:

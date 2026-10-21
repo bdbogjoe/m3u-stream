@@ -85,7 +85,8 @@ def _soap(control_url: str, action: str, body_inner: str) -> requests.Response |
         return None
 
 
-def set_uri(control_url: str, stream_url: str, title: str) -> None:
+def set_uri(control_url: str, stream_url: str, title: str,
+            mime: str = "video/mpeg") -> None:
     metadata = (
         '<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"'
         ' xmlns:dc="http://purl.org/dc/elements/1.1/"'
@@ -93,7 +94,7 @@ def set_uri(control_url: str, stream_url: str, title: str) -> None:
         '<item id="1" parentID="0" restricted="0">'
         f"<dc:title>{escape(title)}</dc:title>"
         "<upnp:class>object.item.videoItem</upnp:class>"
-        f'<res protocolInfo="http-get:*:video/mpeg:*">{escape(stream_url)}</res>'
+        f'<res protocolInfo="http-get:*:{mime}:*">{escape(stream_url)}</res>'
         "</item></DIDL-Lite>"
     )
     body = (

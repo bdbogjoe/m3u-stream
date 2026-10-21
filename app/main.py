@@ -318,6 +318,9 @@ def create_app() -> Flask:
         return f"?t={quote(stream_token)}" if stream_token else ""
 
     def _cast_stream_url(channel) -> str:
+        # Films are plain files the TV can fetch and seek in by itself.
+        if channel.vod:
+            return channel.url
         # LAN-direct: the TV won't resolve an external/proxied hostname.
         return f"{lan_base_url}/{_enc(channel.id)}/stream.ts"
 
@@ -459,7 +462,10 @@ def create_app() -> Flask:
             if c.group:
                 attrs.append(f'group-title="{q(c.group)}"')
             lines.append(f"#EXTINF:-1 {' '.join(attrs)},{c.name}")
-            lines.append(f"{base}/{_enc(c.id)}/stream.{ext}{tok}")
+            if c.vod:
+                lines.append(c.url)
+            else:
+                lines.append(f"{base}/{_enc(c.id)}/stream.{ext}{tok}")
         body = "\n".join(lines) + "\n"
         return Response(body, content_type="audio/x-mpegurl; charset=utf-8")
 
@@ -480,8 +486,9 @@ def create_app() -> Flask:
             channel=channel,
             current_programme=current,
             schedule=schedule,
-            mp4_url=f"{base}/{cid_enc}/stream.mp4{_tok_qs()}",
-            hls_url=f"{base}/{cid_enc}/stream.m3u8{_tok_qs()}",
+            # Films play straight from their file: seekable, and no relay.
+            mp4_url=channel.url if channel.vod else f"{base}/{cid_enc}/stream.mp4{_tok_qs()}",
+            hls_url=channel.url if channel.vod else f"{base}/{cid_enc}/stream.m3u8{_tok_qs()}",
         )
 
     @app.get("/epg")
@@ -637,7 +644,8 @@ def create_app() -> Flask:
                     dlna.stop(control_url)
                 except Exception:
                     pass
-                dlna.set_uri(control_url, _cast_stream_url(channel), channel.name)
+                dlna.set_uri(control_url, _cast_stream_url(channel), channel.name,
+                             channel.vod_mime or "video/mpeg")
                 dlna.play(control_url)
                 state.current = channel
                 state.casting = True
