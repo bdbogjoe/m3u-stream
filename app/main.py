@@ -388,21 +388,29 @@ def create_app() -> Flask:
 
     @app.get("/")
     def index():
+        srcs = sorted(m3u.sources(state.channels), key=str.lower)
+        # With several sources nothing is listed until one is picked: the
+        # film library alone is ~12k tiles, far too heavy to render by default.
+        source = request.args.get("source", "")
+        if len(srcs) <= 1:
+            source = srcs[0] if srcs else ""
+        elif source not in srcs:
+            source = ""
         channels_sorted = sorted(
-            state.channels,
-            key=lambda c: (c.source.lower(), c.group.lower(), c.name.lower()),
+            (c for c in state.channels if source and c.source == source),
+            key=lambda c: (c.group.lower(), c.name.lower()),
         )
         # Pre-build watch URLs server-side so the template can render them
         # directly without computing per-channel URLs in Jinja.
         probe = state.prober.status()
         channels = [_channel_dto(c, probe) for c in channels_sorted]
-        groups = sorted(m3u.groups(state.channels), key=str.lower)
-        srcs = sorted(m3u.sources(state.channels), key=str.lower)
+        groups = sorted(m3u.groups(channels_sorted), key=str.lower)
         return render_template(
             "index.html",
             channels=channels,
             groups=groups,
             sources=srcs,
+            source=source,
             status=_status_dto(),
         )
 

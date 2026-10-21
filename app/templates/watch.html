@@ -3,7 +3,7 @@
 {% block content %}
 <div class="watch">
   <header class="watch-header">
-    <a href="/" class="back">← back</a>
+    <a href="/{% if channel.source %}?source={{ channel.source|urlencode }}{% endif %}" class="back">← back</a>
     <div class="watch-info">
       {% if channel.logo %}
       <img class="watch-logo" src="{{ url_for('logo_route', url=channel.logo) }}" alt=""

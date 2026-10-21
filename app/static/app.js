@@ -58,38 +58,21 @@
     updateActionButtons();
   };
 
-  const rebuildGroupOptions = () => {
-    const s = sourceSel ? sourceSel.value : '';
-    const previous = groupSel.value;
-    const groups = new Set();
-    allTiles.forEach(tile => {
-      if (s && tile.dataset.source !== s) return;
-      if (tile.dataset.group) groups.add(tile.dataset.group);
-    });
-    const sorted = Array.from(groups).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
-    groupSel.innerHTML = '<option value="">All</option>'
-      + sorted.map(g => `<option value="${g.replace(/"/g, '&quot;')}">${g}</option>`).join('');
-    if (sorted.includes(previous)) groupSel.value = previous;
-  };
-
   const applyFilter = () => {
     const g = groupSel.value;
-    const s = sourceSel ? sourceSel.value : '';
     const q = searchInp.value.trim().toLowerCase();
     allTiles.forEach(tile => {
       const matchG = !g || tile.dataset.group === g;
-      const matchS = !s || tile.dataset.source === s;
       const matchQ = !q || tile.dataset.name.includes(q);
-      tile.classList.toggle('hidden', !(matchG && matchS && matchQ));
+      tile.classList.toggle('hidden', !(matchG && matchQ));
     });
     updateOfflineUI();
   };
 
   groupSel.addEventListener('change', applyFilter);
+  // The server only renders the chosen source's tiles.
   if (sourceSel) sourceSel.addEventListener('change', () => {
-    setSelected(null);
-    rebuildGroupOptions();
-    applyFilter();
+    window.location.search = '?source=' + encodeURIComponent(sourceSel.value);
   });
   searchInp.addEventListener('input', applyFilter);
 

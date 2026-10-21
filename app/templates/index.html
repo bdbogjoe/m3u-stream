@@ -7,8 +7,8 @@
     <label>
       Source:
       <select id="source-filter">
-        <option value="">All</option>
-        {% for s in sources %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+        {% if not source %}<option value="" selected disabled>— choose —</option>{% endif %}
+        {% for s in sources %}<option value="{{ s }}"{% if s == source %} selected{% endif %}>{{ s }}</option>{% endfor %}
       </select>
     </label>
     {% endif %}
@@ -49,6 +49,7 @@
 </header>
 
 <main>
+  {% if not source %}<p class="empty">Pick a source to list its channels.</p>{% endif %}
   <div id="grid">
     {% for c in channels %}
     <div class="tile{% if status.current and c.id == status.current.id %} current{% endif %}{% if c.online is sameas false %} offline{% endif %}"
@@ -66,7 +67,7 @@
         {% endif %}
       </div>
       <div class="meta">
-        <div class="name">{{ c.name }}</div>
+        <div class="name" title="{{ c.name }}">{{ c.name }}</div>
         {% if c.current_programme %}<div class="programme" title="{{ c.current_programme }}">📺 {{ c.current_programme }}</div>{% endif %}
         <div class="group">{{ c.group }}</div>
       </div>

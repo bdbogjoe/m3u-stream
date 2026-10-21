@@ -340,3 +340,9 @@ body.show-offline .tile.offline.hidden { display: none; }
   pointer-events: none;
   z-index: 5;
 }
+
+.empty {
+  color: #aaa;
+  padding: 2rem 1rem;
+  text-align: center;
+}
