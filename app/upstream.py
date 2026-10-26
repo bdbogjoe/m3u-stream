@@ -38,6 +38,11 @@ EMPTY_BODY_GIVE_UP = 5
 OVERLAP_AFTER = 0.0
 OVERLAP_BUFFER_MAX = 16 << 20
 
+# Yielded by UpstreamReader.stream() between the bytes of two connections.
+# The cut lands at an arbitrary byte, usually mid-frame, so whoever parses the
+# stream must know where the old connection's tail ends.
+BOUNDARY = object()
+
 
 class _Prefetch:
     """Opens and buffers the next upstream connection in the background."""
@@ -116,11 +121,13 @@ class UpstreamReader:
         req = urllib.request.Request(self.url, headers=self.headers)
         return urllib.request.urlopen(req, timeout=READ_TIMEOUT)
 
-    def stream(self) -> Iterator[bytes]:
+    def stream(self) -> Iterator[object]:
+        """Yield the upstream bytes, with BOUNDARY between two connections."""
         attempt = 0
         consecutive_empty = 0
         resp = None
         carry = b""          # already fetched from the pre-opened connection
+        sessions = 0
         while not self._stop:
             if resp is None:
                 try:
@@ -138,6 +145,9 @@ class UpstreamReader:
 
             self._resp = resp
             attempt = 0
+            if sessions:
+                yield BOUNDARY
+            sessions += 1
             bytes_this_session = 0
             prefetch: Optional[_Prefetch] = None
             started = time.monotonic()
