@@ -1,15 +1,16 @@
 """HTTP upstream reader with automatic reconnect.
 
-The IPTV upstream this project relays from closes the HTTP response every few
-seconds. This reader transparently reopens the connection and continues
-yielding bytes. Deduplication of replayed content is handled by the TS-aware
-filter (see app/tsdedup.py) — this module is intentionally a thin reconnect
-loop that does not touch payload semantics.
+The IPTV upstream may close the HTTP response at any time. This reader
+transparently reopens the connection and continues yielding bytes.
+Deduplication of replayed content is handled by the TS-aware filter (see
+app/tsdedup.py) — this module is intentionally a thin reconnect loop that does
+not touch payload semantics.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 import urllib.error
@@ -28,14 +29,17 @@ RECONNECT_MAX_ATTEMPTS = 12
 # still answers 200. Bailing out lets the consumer (ffmpeg) wind down so
 # downstream client-disconnect handling can run.
 EMPTY_BODY_GIVE_UP = 5
-# Open the next connection before the current one drops, so its replayed head
-# is already downloaded at handover and the consumer never runs dry.
-# Measured on the live upstream: connection lifetime is 1s min, 6s median,
-# 27s max. 18s covered 1 cut in 4, 3s covered 41% -- some connections die
-# before the timer even fires. 0 keeps a spare connection open at all times,
-# which is the only way to cover the short ones. Costs two connections to the
-# provider per channel, shared by every viewer since HLS muxes them.
-OVERLAP_AFTER = 0.0
+# Open the next connection this many seconds into the current one, so its
+# replayed head is already downloaded when the current one drops; unset to
+# never do it. Only for a provider that cuts connections on its own and allows
+# two at once: one that allows a single connection (france-ott does) closes the
+# current one as soon as the spare opens, so the spare causes the very cuts it
+# was meant to cover -- every few seconds with 0, each a chance to lose a
+# frame. Measured on france-ott with no spare: one connection, 120 s, no cut.
+# Costs two connections to the provider per channel, shared by every viewer
+# since HLS muxes them.
+_preopen = os.environ.get("UPSTREAM_PREOPEN_AFTER", "").strip()
+OVERLAP_AFTER: Optional[float] = float(_preopen) if _preopen else None
 OVERLAP_BUFFER_MAX = 16 << 20
 
 # Yielded by UpstreamReader.stream() between the bytes of two connections.
@@ -168,7 +172,7 @@ class UpstreamReader:
                         break
                     bytes_this_session += len(chunk)
                     yield chunk
-                    if (prefetch is None
+                    if (prefetch is None and OVERLAP_AFTER is not None
                             and time.monotonic() - started >= OVERLAP_AFTER):
                         prefetch = _Prefetch(self._open)
             finally:

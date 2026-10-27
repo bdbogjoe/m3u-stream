@@ -15,7 +15,6 @@ class AppState:
         self.current: Optional[Channel] = None
         self.control_url: Optional[str] = None
         self.casting: bool = False
-        self.prober = Prober()
 
         # Relay resolves channel ids to URLs by asking us back.
         self.relay = Relay(
@@ -26,6 +25,7 @@ class AppState:
             stream_token=stream_token,
             resolve_url=self._resolve_url,
         )
+        self.prober = Prober(busy=self.relay.busy)
 
     def channel_by_id(self, cid: str) -> Optional[Channel]:
         for c in self.channels:

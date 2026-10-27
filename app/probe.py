@@ -1,6 +1,7 @@
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from typing import Callable
 
 import requests
 
@@ -41,9 +42,11 @@ class Prober:
     snapshots.
     """
 
-    def __init__(self, max_workers: int = 16, timeout: float = 4.0):
+    def __init__(self, max_workers: int = 16, timeout: float = 4.0,
+                 busy: Callable[[], bool] = lambda: False):
         self.max_workers = max_workers
         self.timeout = timeout
+        self._busy = busy
         self._lock = threading.Lock()
         self._status: dict[str, bool] = {}
         self._running = False
@@ -72,17 +75,33 @@ class Prober:
         # offline the way live channels do. They stay "not probed".
         channels = [c for c in channels if not c.vod]
         log.info("probing %d channels", len(channels))
+        previous = self.status()
+        skipped = 0
+
+        def probe(c: Channel):
+            # A probe is a streaming connection like any other: on a
+            # subscription that allows a single one, it cuts whoever is
+            # watching. The channel keeps its last known state instead.
+            nonlocal skipped
+            if self._busy():
+                skipped += 1
+                return previous.get(c.id)
+            return probe_url(c.url, self.timeout)
+
         results: dict[str, bool] = {}
         with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
-            futs = {pool.submit(probe_url, c.url, self.timeout): c for c in channels}
+            futs = {pool.submit(probe, c): c for c in channels}
             for fut in futs:
                 c = futs[fut]
                 try:
-                    results[c.id] = fut.result()
+                    result = fut.result()
                 except Exception:
-                    results[c.id] = False
+                    result = False
+                if result is not None:
+                    results[c.id] = result
         ok = sum(1 for v in results.values() if v)
-        log.info("probe done: %d/%d online", ok, len(results))
+        log.info("probe done: %d/%d online%s", ok, len(results),
+                 f", {skipped} skipped while a stream was playing" if skipped else "")
         with self._lock:
             self._status = results
             self._running = False

@@ -271,7 +271,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return
             kind = "mp4" if fmt == "mp4" else "mpegts"
             ct = "video/mp4" if fmt == "mp4" else "video/mpeg"
-            self._serve_ffmpeg_pipe(ctx.source_url, kind, ct)
+            relay.count_pipe(1)
+            try:
+                self._serve_ffmpeg_pipe(ctx.source_url, kind, ct)
+            finally:
+                relay.count_pipe(-1)
             return
 
         self._send_no_stream()
@@ -422,6 +426,7 @@ class Relay:
 
         self._base_hls_dir = Path(tempfile.mkdtemp(prefix="m3u-stream-hls-"))
         self._streams: dict[str, _StreamCtx] = {}
+        self._pipes = 0
         self._lock = threading.Lock()
 
         server = _ThreadedTCPServer(("", port), _Handler)
@@ -465,6 +470,18 @@ class Relay:
                 log.info("starting ffmpeg(hls) for channel %s", channel_id)
                 self._start_hls(ctx)
             return ctx
+
+    def count_pipe(self, delta: int) -> None:
+        with self._lock:
+            self._pipes += delta
+
+    def busy(self) -> bool:
+        """Whether an upstream connection is open for a viewer."""
+        with self._lock:
+            if self._pipes:
+                return True
+            return any(ctx.hls_proc is not None and ctx.hls_proc.poll() is None
+                       for ctx in self._streams.values())
 
     def shutdown(self) -> None:
         with self._lock:
