@@ -71,16 +71,36 @@ def _channel_hash_id(source: str, natural: str) -> str:
     return hashlib.sha1(f"{source}:{natural}".encode("utf-8")).hexdigest()[:10]
 
 
-def _load_all(sources: list[tuple[str, str]]) -> list[m3u.Channel]:
+def _load_all(sources: list[tuple[str, str]],
+              prefer_cache: bool = False) -> tuple[list[m3u.Channel], bool]:
+    """Load every source; returns the channels and whether all were fresh.
+
+    With `prefer_cache`, a source's last saved copy is used without a
+    download, so startup doesn't wait on the provider. Either way, a failed
+    download falls back to that copy, and only a source with neither aborts.
+    """
     all_channels: list[m3u.Channel] = []
+    all_fresh = True
     for name, url in sources:
-        channels = m3u.fetch(url)
+        channels = m3u.load_cached(url) if prefer_cache else None
+        origin = "cache"
+        if channels is None:
+            try:
+                channels = m3u.fetch(url)
+                origin = "fetched"
+            except Exception as e:
+                channels = m3u.load_cached(url)
+                if channels is None:
+                    raise
+                log.warning("fetch failed for %s (%s), keeping cached copy", name, e)
+        if origin == "cache":
+            all_fresh = False
         for c in channels:
             c.source = name
             c.id = _channel_hash_id(name, c.id)
-        log.info("loaded %d channels from %s (%s)", len(channels), name, url)
+        log.info("loaded %d channels from %s (%s, %s)", len(channels), name, url, origin)
         all_channels.extend(channels)
-    return all_channels
+    return all_channels, all_fresh
 
 
 def create_app() -> Flask:
@@ -138,7 +158,7 @@ def create_app() -> Flask:
                      auth_user=auth_user, auth_pass=auth_pass,
                      auth_trusted_nets=trusted_nets, stream_token=stream_token)
     try:
-        state.channels = _load_all(sources)
+        state.channels, channels_fresh = _load_all(sources, prefer_cache=True)
         log.info("loaded %d channels total from %d source(s)",
                  len(state.channels), len(sources))
     except Exception as e:
@@ -172,7 +192,24 @@ def create_app() -> Flask:
         if epg_aliases_path:
             log.info("EPG_ALIASES   = %s", epg_aliases_path)
 
-    state.prober.start(state.channels)
+    if channels_fresh:
+        state.prober.start(state.channels)
+    else:
+        # Started on saved playlists: fetch the current ones behind the
+        # running UI, and probe those rather than the copies.
+        def _refresh_channels():
+            try:
+                channels, _ = _load_all(sources)
+            except Exception as e:
+                log.warning("background M3U refresh failed: %s", e)
+                channels = state.channels
+            else:
+                with state.lock:
+                    state.channels = channels
+                log.info("refreshed %d channels from %d source(s)",
+                         len(channels), len(sources))
+            state.prober.start(channels)
+        threading.Thread(target=_refresh_channels, daemon=True).start()
     probe_interval = int(os.environ.get("PROBE_INTERVAL", "600"))
     if probe_interval > 0:
         log.info("probe interval = %ds", probe_interval)
@@ -676,9 +713,11 @@ def create_app() -> Flask:
     @app.post("/reload")
     def reload_route():
         try:
-            channels = _load_all(sources)
+            channels, fresh = _load_all(sources)
         except Exception as e:
             return jsonify(ok=False, error=str(e)), 502
+        if not fresh:
+            return jsonify(ok=False, error="could not fetch every M3U source"), 502
         with state.lock:
             state.channels = channels
         state.prober.start(channels)

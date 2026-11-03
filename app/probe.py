@@ -1,3 +1,4 @@
+import json
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -5,6 +6,7 @@ from typing import Callable
 
 import requests
 
+from . import cache
 from .m3u import Channel
 
 log = logging.getLogger("m3u-stream.probe")
@@ -48,8 +50,27 @@ class Prober:
         self.timeout = timeout
         self._busy = busy
         self._lock = threading.Lock()
-        self._status: dict[str, bool] = {}
+        # Last run's results, so a restart doesn't show every channel as
+        # unprobed until the first batch completes. Ids are stable hashes
+        # of source + channel, so they still match after a reload.
+        self._status: dict[str, bool] = self._load_saved()
         self._running = False
+
+    _CACHE_NAME = "probe-status.json"
+
+    def _load_saved(self) -> dict[str, bool]:
+        text = cache.read_text(self._CACHE_NAME)
+        if not text:
+            return {}
+        try:
+            data = json.loads(text)
+        except ValueError:
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        status = {str(k): bool(v) for k, v in data.items()}
+        log.info("restored probe status for %d channels", len(status))
+        return status
 
     def status(self) -> dict[str, bool]:
         with self._lock:
@@ -105,3 +126,4 @@ class Prober:
         with self._lock:
             self._status = results
             self._running = False
+        cache.write_text(self._CACHE_NAME, json.dumps(results))

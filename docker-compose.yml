@@ -15,4 +15,10 @@ services:
       AUTH_PASS: ${AUTH_PASS:-}
       AUTH_TRUSTED_CIDRS: ${AUTH_TRUSTED_CIDRS:-}
       TZ: ${TZ:-Europe/Paris}
+      CACHE_DIR: /cache
+    volumes:
+      - cache:/cache
     restart: unless-stopped
+
+volumes:
+  cache:

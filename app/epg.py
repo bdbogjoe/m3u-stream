@@ -3,7 +3,6 @@ import io
 import logging
 import os
 import re
-import tempfile
 import threading
 import time
 import unicodedata
@@ -12,6 +11,8 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, Optional
+
+from . import cache
 
 log = logging.getLogger("m3u-stream.epg")
 
@@ -82,13 +83,20 @@ class EPG:
         self._name_to_id: dict[str, str] = {}
         # The merged XMLTV is written to disk, not held in memory: it weighs
         # well over 100 MB and is only ever streamed back out verbatim.
-        self._xml_path = os.path.join(tempfile.gettempdir(), "m3u-stream-epg.xml")
+        # It doubles as the restart cache: re-reading it is far quicker than
+        # downloading and filtering the feeds again. Keyed by the feed list,
+        # so changing EPG_URL doesn't resurrect another configuration's guide.
+        self._xml_path = cache.path_for(f"epg-{cache.key_for(','.join(self.urls))}.xml")
         self._xml_ready = False
         self._lock = threading.Lock()
         self._loaded = threading.Event()
         threading.Thread(target=self._refresher, daemon=True).start()
 
     def _refresher(self) -> None:
+        delay = self._load_saved()
+        if delay > 0:
+            log.info("next EPG fetch in %d min", delay // 60)
+            time.sleep(delay)
         while True:
             try:
                 self._refresh()
@@ -135,6 +143,25 @@ class EPG:
             log.info("EPG aliases: %d entries from %s", len(out), path)
         return out
 
+    def _load_saved(self) -> float:
+        """Serve the guide saved by a previous run, if any.
+
+        Returns the seconds left before it is due for a refetch: 0 when
+        there is none, or when it is older than the TTL (it is still loaded
+        then, so the UI has a guide while the fresh one downloads).
+        """
+        try:
+            mtime = os.path.getmtime(self._xml_path)
+        except OSError:
+            return 0
+        try:
+            self._refresh(saved_mtime=mtime)
+        except Exception as e:
+            log.warning("cannot load saved EPG %s: %s", self._xml_path, e)
+            return 0
+        self._loaded.set()
+        return max(0.0, self.ttl - (time.time() - mtime))
+
     def _fetch_one(self, url: str) -> bytes:
         log.info("fetching EPG from %s", url)
         req = urllib.request.Request(url, headers={"User-Agent": "m3u-stream-epg/1.0"})
@@ -144,7 +171,8 @@ class EPG:
             data = gzip.decompress(data)
         return data
 
-    def _refresh(self) -> None:
+    def _refresh(self, saved_mtime: float | None = None) -> None:
+        """Fetch the feeds, or with `saved_mtime` re-read the saved guide."""
         progs: dict[str, list[Programme]] = {}
         names: dict[str, str] = {}
         # Some XMLTV feeds (notably epgshare01's FR1) publish each programme
@@ -171,9 +199,13 @@ class EPG:
         tmp_path = self._xml_path + ".tmp"
         with open(tmp_path, "wb") as out:
             out.write(b'<?xml version="1.0" encoding="utf-8"?>\n<tv>\n')
-            for url in self.urls:
+            for url in ([self._xml_path] if saved_mtime is not None else self.urls):
                 try:
-                    data = self._fetch_one(url)
+                    if saved_mtime is not None:
+                        with open(url, "rb") as fh:
+                            data = fh.read()
+                    else:
+                        data = self._fetch_one(url)
                 except Exception as e:
                     log.warning("EPG fetch failed for %s: %s", url, e)
                     continue
@@ -264,14 +296,19 @@ class EPG:
         for plist in progs.values():
             plist.sort(key=lambda p: p.start)
         os.replace(tmp_path, self._xml_path)
+        if saved_mtime is not None:
+            # The rewrite must not make the saved guide look fresh, or each
+            # restart would push its refetch back by another TTL.
+            os.utime(self._xml_path, (saved_mtime, saved_mtime))
         size_mb = os.path.getsize(self._xml_path) / (1024 * 1024)
         with self._lock:
             self._programmes = progs
             self._name_to_id = names
             self._aliases = aliases
             self._xml_ready = True
-        log.info("EPG loaded: %d channels with programmes, %d display-names from %d/%d "
+        log.info("EPG loaded%s: %d channels with programmes, %d display-names from %d/%d "
                  "source(s); channels kept %d, dropped %d; xml %.1f MB on disk",
+                 " from saved copy" if saved_mtime is not None else "",
                  len(progs), len(names), ok_urls, len(self.urls), kept, dropped, size_mb)
 
     def _current_for_id(self, cid: str) -> Programme | None:

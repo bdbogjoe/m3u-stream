@@ -5,6 +5,8 @@ from urllib.parse import urlparse
 
 import requests
 
+from . import cache
+
 
 _EXTINF_ATTR = re.compile(r'([\w-]+)="([^"]*)"')
 _SCHEME = re.compile(r'https?://')
@@ -102,10 +104,28 @@ def parse(text: str) -> list[Channel]:
     return channels
 
 
+def _cache_name(url: str) -> str:
+    return f"m3u-{cache.key_for(url)}.m3u"
+
+
 def fetch(url: str, timeout: int = 15) -> list[Channel]:
+    """Download and parse a playlist, keeping a copy for `load_cached`."""
     r = requests.get(url, timeout=timeout)
     r.raise_for_status()
-    return parse(r.text)
+    channels = parse(r.text)
+    if channels:
+        # An empty answer is more likely a provider hiccup than a real
+        # empty playlist: don't let it replace a good copy.
+        cache.write_text(_cache_name(url), r.text)
+    return channels
+
+
+def load_cached(url: str) -> list[Channel] | None:
+    """The playlist as last fetched, None when there is no usable copy."""
+    text = cache.read_text(_cache_name(url))
+    if text is None:
+        return None
+    return parse(text) or None
 
 
 def groups(channels: Iterable[Channel]) -> list[str]:
